@@ -3200,7 +3200,6 @@ case "$target_arch2" in
     echo "TARGET_ABI32=y" >> $config_target_mak
     target_phys_bits=64
   ;;
-<<<<<<< HEAD
   ia64)
     TARGET_ARCH=ia64
     target_phys_bits=64
