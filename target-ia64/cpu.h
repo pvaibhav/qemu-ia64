@@ -28,25 +28,16 @@
 #define CPUState struct CPUIA64State
 
 #include "cpu-defs.h"
+#define TARGET_PAGE_BITS 12
+#define TARGET_PHYS_ADDR_SPACE_BITS 64
+#define TARGET_VIRT_ADDR_SPACE_BITS 64
+
+#include "cpu-all.h"
 
 #include "softfloat.h"
 
 #define NB_MMU_MODES 2 // guess
 #define MMU_USER_IDX 0 // guess
-
-typedef union FPReg {
-    struct {
-#ifdef WORDS_BIGENDIAN
-        float32 e;
-        int32_t __pad;
-#else
-        int32_t __pad;
-        float32 e;
-#endif
-    };
-    float64 d;
-    uint64_t i;
-} FPReg;
 
 typedef struct CPUIA64State {
     uint64_t    gr[128];    // general registers gr0 - gr127
@@ -92,15 +83,13 @@ int cpu_ia64_signal_handler(int host_signum, void *pinfo,
                            void *puc);
 int cpu_ia64_handle_mmu_fault (CPUIA64State *env, target_ulong address, int rw,
                               int mmu_idx, int is_softmuu);
+
 #define cpu_handle_mmu_fault cpu_ia64_handle_mmu_fault
-
-#define TARGET_PAGE_BITS 12
-
 #define cpu_init cpu_ia64_init
 #define cpu_exec cpu_ia64_exec
 #define cpu_gen_code cpu_ia64_gen_code
+#define cpu_signal_handler cpu_ia64_signal_handler
 
-#include "cpu-all.h"
 #include "exec-all.h"
 
 #define EXCP_OPEX 1 /* operation exception (sigill) */

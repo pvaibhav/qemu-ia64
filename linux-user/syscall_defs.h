@@ -59,7 +59,7 @@
 
 #if defined(TARGET_I386) || defined(TARGET_ARM) || defined(TARGET_SH4) \
     || defined(TARGET_M68K) || defined(TARGET_CRIS) || defined(TARGET_UNICORE32) \
-    || defined(TARGET_S390X)
+    || defined(TARGET_S390X) || defined(TARGET_IA64)
 
 #define TARGET_IOC_SIZEBITS	14
 #define TARGET_IOC_DIRBITS	2
@@ -323,7 +323,7 @@ int do_sigaction(int sig, const struct target_sigaction *act,
     || defined(TARGET_PPC) || defined(TARGET_MIPS) || defined(TARGET_SH4) \
     || defined(TARGET_M68K) || defined(TARGET_ALPHA) || defined(TARGET_CRIS) \
     || defined(TARGET_MICROBLAZE) || defined(TARGET_UNICORE32) \
-    || defined(TARGET_S390X)
+    || defined(TARGET_S390X) || defined(TARGET_IA64)
 
 #if defined(TARGET_SPARC)
 #define TARGET_SA_NOCLDSTOP    8u
@@ -1666,7 +1666,7 @@ struct __attribute__((__packed__)) target_stat64 {
 	unsigned long long	st_ino;
 };
 
-#elif defined(TARGET_I386) && !defined(TARGET_ABI32)
+#elif defined(TARGET_I386) && !defined(TARGET_ABI32) || defined(TARGET_IA64)
 struct target_stat {
 	abi_ulong	st_dev;
 	abi_ulong	st_ino;
@@ -1769,7 +1769,8 @@ struct target_statfs64 {
 	uint32_t	f_spare[6];
 };
 #elif (defined(TARGET_PPC64) || defined(TARGET_X86_64) || \
-       defined(TARGET_SPARC64)) && !defined(TARGET_ABI32)
+       defined(TARGET_SPARC64)) && !defined(TARGET_ABI32) || \
+       defined(TARGET_IA64)
 struct target_statfs {
 	abi_long f_type;
 	abi_long f_bsize;

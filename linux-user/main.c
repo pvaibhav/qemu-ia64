@@ -3518,6 +3518,10 @@ int main(int argc, char **argv, char **envp)
             env->psw.mask = regs->psw.mask;
             env->psw.addr = regs->psw.addr;
     }
+#elif defined(TARGET_IA64)
+    {
+        // Nothing special TODO
+    }
 #else
 #error unsupported target CPU
 #endif
