@@ -29,6 +29,7 @@
 
 #include "cpu-defs.h"
 #define TARGET_PAGE_BITS 12
+
 #define TARGET_PHYS_ADDR_SPACE_BITS 64
 #define TARGET_VIRT_ADDR_SPACE_BITS 64
 
@@ -97,6 +98,11 @@ int cpu_ia64_handle_mmu_fault (CPUIA64State *env, target_ulong address, int rw,
 #define EXCP_ADDR 5 /* addressing exception */
 #define EXCP_EXECUTE_SVC 0xff00000 /* supervisor call via execute insn */
 
+static inline int cpu_has_work(CPUState *env)
+{
+    return env->interrupt_request & CPU_INTERRUPT_HARD; // guess
+}
+
 static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock* tb)
 {
     env->ip = tb->pc;
@@ -107,6 +113,6 @@ static inline void cpu_get_tb_cpu_state(CPUState* env, target_ulong *pc,
 {
     *pc = env->ip;
     *cs_base = 0; // XXX: makes sense for itanium ?
-    /* TODO: *flags = env->psw.mask; */
+    *flags = 0; // XXX
 }
 #endif

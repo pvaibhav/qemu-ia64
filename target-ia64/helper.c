@@ -45,11 +45,6 @@ CPUIA64State *cpu_ia64_init(const char *cpu_model)
     return env;
 }
 
-target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
-{
-    return addr;
-}
-
 void cpu_reset(CPUIA64State *env)
 {
     if (qemu_loglevel_mask(CPU_LOG_RESET)) {
@@ -60,4 +55,11 @@ void cpu_reset(CPUIA64State *env)
     memset(env, 0, offsetof(CPUIA64State, breakpoints));
     /* FIXME: reset vector? */
     tlb_flush(env, 1);
+}
+
+int cpu_ia64_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
+                              int mmu_idx, int is_softmmu)
+{
+    env->exception_index = EXCP_ADDR;
+    return 1;
 }

@@ -26,11 +26,6 @@ register struct CPUIA64State *env asm(AREG0);
 #include "cpu.h"
 #include "exec-all.h"
 
-static inline int cpu_has_work(CPUState *env)
-{
-    return env->interrupt_request & CPU_INTERRUPT_HARD; // guess
-}
-
 static inline void regs_to_env(void)
 {
 }

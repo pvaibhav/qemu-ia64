@@ -886,6 +886,20 @@ static inline void init_thread(struct target_pt_regs *regs, struct image_info *i
 
 #endif /* TARGET_S390X */
 
+#ifdef TARGET_IA64
+
+#define ELF_START_MMAP  (0x400000000000ULL) /* arbitrary */
+#define ELF_CLASS   ELFCLASS64
+#define ELF_ARCH    EM_IA_64
+#define elf_check_arch(x) ((x) == ELF_ARCH)
+
+static inline void init_thread(struct target_pt_regs *regs, struct image_info *infop)
+{
+    // TODO
+}
+
+#endif /* TARGET_IA64 */
+
 #ifndef ELF_PLATFORM
 #define ELF_PLATFORM (NULL)
 #endif

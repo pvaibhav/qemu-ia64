@@ -2751,6 +2751,27 @@ void cpu_loop(CPUS390XState *env)
 
 #endif /* TARGET_S390X */
 
+#ifdef TARGET_IA64
+void cpu_loop(CPUIA64State *env)
+{
+    int trapnr;
+    // XXX needed later: target_siginfo_t info;
+
+    while (1) {
+        trapnr = cpu_ia64_exec (env);
+
+        switch (trapnr) {
+            // TODO: handle traps
+        default:
+            printf ("Unhandled trap: 0x%x\n", trapnr);
+            cpu_dump_state(env, stderr, fprintf, 0);
+            exit (1);
+        }
+        process_pending_signals (env);
+    }
+}
+#endif /* TARGET_IA64 */
+
 static void version(void)
 {
     printf("qemu-" TARGET_ARCH " version " QEMU_VERSION QEMU_PKGVERSION
