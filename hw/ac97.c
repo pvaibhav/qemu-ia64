@@ -1001,8 +1001,6 @@ static int write_audio (AC97LinkState *s, AC97BusMasterRegs *r,
 
 static void write_bup (AC97LinkState *s, int elapsed)
 {
-    int written = 0;
-
     dolog ("write_bup\n");
     if (!(s->bup_flag & BUP_SET)) {
         if (s->bup_flag & BUP_LAST) {
@@ -1026,7 +1024,6 @@ static void write_bup (AC97LinkState *s, int elapsed)
                 return;
             temp -= copied;
             elapsed -= copied;
-            written += copied;
         }
     }
 }
@@ -1069,7 +1066,7 @@ static int read_audio (AC97LinkState *s, AC97BusMasterRegs *r,
 static void transfer_audio (AC97LinkState *s, int index, int elapsed)
 {
     AC97BusMasterRegs *r = &s->bm_regs[index];
-    int written = 0, stop = 0;
+    int stop = 0;
 
     if (s->invalid_freq[index]) {
         AUD_log ("ac97", "attempt to use voice %d with invalid frequency %d\n",
@@ -1114,7 +1111,6 @@ static void transfer_audio (AC97LinkState *s, int index, int elapsed)
         switch (index) {
         case PO_INDEX:
             temp = write_audio (s, r, elapsed, &stop);
-            written += temp;
             elapsed -= temp;
             r->picb -= (temp >> 1);
             break;
@@ -1281,40 +1277,39 @@ static int ac97_initfn (PCIDevice *dev)
     AC97LinkState *s = DO_UPCAST (AC97LinkState, dev, dev);
     uint8_t *c = s->dev.config;
 
-    pci_config_set_vendor_id (c, PCI_VENDOR_ID_INTEL); /* ro */
-    pci_config_set_device_id (c, PCI_DEVICE_ID_INTEL_82801AA_5); /* ro */
+    /* TODO: no need to override */
+    c[PCI_COMMAND] = 0x00;      /* pcicmd pci command rw, ro */
+    c[PCI_COMMAND + 1] = 0x00;
 
-    c[0x04] = 0x00;      /* pcicmd pci command rw, ro */
-    c[0x05] = 0x00;
+    /* TODO: */
+    c[PCI_STATUS] = PCI_STATUS_FAST_BACK;      /* pcists pci status rwc, ro */
+    c[PCI_STATUS + 1] = PCI_STATUS_DEVSEL_MEDIUM >> 8;
 
-    c[0x06] = 0x80;      /* pcists pci status rwc, ro */
-    c[0x07] = 0x02;
+    c[PCI_CLASS_PROG] = 0x00;      /* pi programming interface ro */
 
-    c[0x08] = 0x01;      /* rid revision ro */
-    c[0x09] = 0x00;      /* pi programming interface ro */
-    pci_config_set_class (c, PCI_CLASS_MULTIMEDIA_AUDIO); /* ro */
-    c[PCI_HEADER_TYPE] = PCI_HEADER_TYPE_NORMAL; /* headtyp header type ro */
+    /* TODO set when bar is registered. no need to override. */
+    /* nabmar native audio mixer base address rw */
+    c[PCI_BASE_ADDRESS_0] = PCI_BASE_ADDRESS_SPACE_IO;
+    c[PCI_BASE_ADDRESS_0 + 1] = 0x00;
+    c[PCI_BASE_ADDRESS_0 + 2] = 0x00;
+    c[PCI_BASE_ADDRESS_0 + 3] = 0x00;
 
-    c[0x10] = 0x01;      /* nabmar native audio mixer base
-                            address rw */
-    c[0x11] = 0x00;
-    c[0x12] = 0x00;
-    c[0x13] = 0x00;
+    /* TODO set when bar is registered. no need to override. */
+      /* nabmbar native audio bus mastering base address rw */
+    c[PCI_BASE_ADDRESS_0 + 4] = PCI_BASE_ADDRESS_SPACE_IO;
+    c[PCI_BASE_ADDRESS_0 + 5] = 0x00;
+    c[PCI_BASE_ADDRESS_0 + 6] = 0x00;
+    c[PCI_BASE_ADDRESS_0 + 7] = 0x00;
 
-    c[0x14] = 0x01;      /* nabmbar native audio bus mastering
-                            base address rw */
-    c[0x15] = 0x00;
-    c[0x16] = 0x00;
-    c[0x17] = 0x00;
+    c[PCI_SUBSYSTEM_VENDOR_ID] = 0x86;      /* svid subsystem vendor id rwo */
+    c[PCI_SUBSYSTEM_VENDOR_ID + 1] = 0x80;
 
-    c[0x2c] = 0x86;      /* svid subsystem vendor id rwo */
-    c[0x2d] = 0x80;
+    c[PCI_SUBSYSTEM_ID] = 0x00;      /* sid subsystem id rwo */
+    c[PCI_SUBSYSTEM_ID + 1] = 0x00;
 
-    c[0x2e] = 0x00;      /* sid subsystem id rwo */
-    c[0x2f] = 0x00;
-
-    c[0x3c] = 0x00;      /* intr_ln interrupt line rw */
-    c[0x3d] = 0x01;      /* intr_pn interrupt pin ro */
+    c[PCI_INTERRUPT_LINE] = 0x00;      /* intr_ln interrupt line rw */
+    /* TODO: RST# value should be 0. */
+    c[PCI_INTERRUPT_PIN] = 0x01;      /* intr_pn interrupt pin ro */
 
     pci_register_bar (&s->dev, 0, 256 * 4, PCI_BASE_ADDRESS_SPACE_IO,
                       ac97_map);
@@ -1337,6 +1332,10 @@ static PCIDeviceInfo ac97_info = {
     .qdev.size    = sizeof (AC97LinkState),
     .qdev.vmsd    = &vmstate_ac97,
     .init         = ac97_initfn,
+    .vendor_id    = PCI_VENDOR_ID_INTEL,
+    .device_id    = PCI_DEVICE_ID_INTEL_82801AA_5,
+    .revision     = 0x01,
+    .class_id     = PCI_CLASS_MULTIMEDIA_AUDIO,
 };
 
 static void ac97_register (void)

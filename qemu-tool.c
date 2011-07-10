@@ -13,13 +13,13 @@
 
 #include "qemu-common.h"
 #include "monitor.h"
-#include "sysemu.h"
 #include "qemu-timer.h"
 #include "qemu-log.h"
 
 #include <sys/time.h>
 
 QEMUClock *rt_clock;
+QEMUClock *vm_clock;
 
 FILE *logfile;
 
@@ -35,6 +35,19 @@ void qemu_service_io(void)
 
 Monitor *cur_mon;
 
+int monitor_cur_is_qmp(void)
+{
+    return 0;
+}
+
+void monitor_set_error(Monitor *mon, QError *qerror)
+{
+}
+
+void monitor_vprintf(Monitor *mon, const char *fmt, va_list ap)
+{
+}
+
 void monitor_printf(Monitor *mon, const char *fmt, ...)
 {
 }
@@ -43,55 +56,12 @@ void monitor_print_filename(Monitor *mon, const char *filename)
 {
 }
 
-void async_context_push(void)
-{
-}
-
-void async_context_pop(void)
-{
-}
-
-int get_async_context_id(void)
-{
-    return 0;
-}
-
 void monitor_protocol_event(MonitorEvent event, QObject *data)
 {
 }
 
-QEMUBH *qemu_bh_new(QEMUBHFunc *cb, void *opaque)
-{
-    QEMUBH *bh;
-
-    bh = qemu_malloc(sizeof(*bh));
-    bh->cb = cb;
-    bh->opaque = opaque;
-
-    return bh;
-}
-
-int qemu_bh_poll(void)
-{
-    return 0;
-}
-
-void qemu_bh_schedule(QEMUBH *bh)
-{
-    bh->cb(bh->opaque);
-}
-
-void qemu_bh_cancel(QEMUBH *bh)
-{
-}
-
-void qemu_bh_delete(QEMUBH *bh)
-{
-    qemu_free(bh);
-}
-
 int qemu_set_fd_handler2(int fd,
-                         IOCanRWHandler *fd_read_poll,
+                         IOCanReadHandler *fd_read_poll,
                          IOHandler *fd_read,
                          IOHandler *fd_write,
                          void *opaque)
@@ -99,18 +69,30 @@ int qemu_set_fd_handler2(int fd,
     return 0;
 }
 
-int64_t qemu_get_clock(QEMUClock *clock)
+void qemu_notify_event(void)
 {
-    qemu_timeval tv;
-    qemu_gettimeofday(&tv);
-    return (tv.tv_sec * 1000000000LL + (tv.tv_usec * 1000)) / 1000000;
 }
 
-void qemu_error(const char *fmt, ...)
+QEMUTimer *qemu_new_timer(QEMUClock *clock, int scale,
+                          QEMUTimerCB *cb, void *opaque)
 {
-    va_list args;
+    return qemu_malloc(1);
+}
 
-    va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
-    va_end(args);
+void qemu_free_timer(QEMUTimer *ts)
+{
+    qemu_free(ts);
+}
+
+void qemu_del_timer(QEMUTimer *ts)
+{
+}
+
+void qemu_mod_timer(QEMUTimer *ts, int64_t expire_time)
+{
+}
+
+int64_t qemu_get_clock_ns(QEMUClock *clock)
+{
+    return 0;
 }

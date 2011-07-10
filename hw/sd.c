@@ -31,6 +31,7 @@
 
 #include "hw.h"
 #include "block.h"
+#include "block_int.h"
 #include "sd.h"
 
 //#define DEBUG_SD 1
@@ -421,9 +422,14 @@ static void sd_reset(SDState *sd, BlockDriverState *bdrv)
     sd->pwd_len = 0;
 }
 
-static void sd_cardchange(void *opaque)
+static void sd_cardchange(void *opaque, int reason)
 {
     SDState *sd = opaque;
+
+    if (!(reason & CHANGE_MEDIA)) {
+        return;
+    }
+
     qemu_set_irq(sd->inserted_cb, bdrv_is_inserted(sd->bdrv));
     if (bdrv_is_inserted(sd->bdrv)) {
         sd_reset(sd, sd->bdrv);
@@ -440,7 +446,7 @@ SDState *sd_init(BlockDriverState *bs, int is_spi)
     SDState *sd;
 
     sd = (SDState *) qemu_mallocz(sizeof(SDState));
-    sd->buf = qemu_memalign(512, 512);
+    sd->buf = qemu_blockalign(bs, 512);
     sd->spi = is_spi;
     sd->enable = 1;
     sd_reset(sd, bs);
@@ -454,8 +460,8 @@ void sd_set_cb(SDState *sd, qemu_irq readonly, qemu_irq insert)
 {
     sd->readonly_cb = readonly;
     sd->inserted_cb = insert;
-    qemu_set_irq(readonly, bdrv_is_read_only(sd->bdrv));
-    qemu_set_irq(insert, bdrv_is_inserted(sd->bdrv));
+    qemu_set_irq(readonly, sd->bdrv ? bdrv_is_read_only(sd->bdrv) : 0);
+    qemu_set_irq(insert, sd->bdrv ? bdrv_is_inserted(sd->bdrv) : 0);
 }
 
 static void sd_erase(SDState *sd)
@@ -668,6 +674,10 @@ static sd_rsp_type_t sd_normal_command(SDState *sd,
             break;
         }
         break;
+
+    case 5: /* CMD5: reserved for SDIO cards */
+        sd->card_status |= ILLEGAL_COMMAND;
+        return sd_r0;
 
     case 6:	/* CMD6:   SWITCH_FUNCTION */
         if (sd->spi)
@@ -1094,6 +1104,17 @@ static sd_rsp_type_t sd_normal_command(SDState *sd,
         }
         break;
 
+    case 52:
+    case 53:
+        /* CMD52, CMD53: reserved for SDIO cards
+         * (see the SDIO Simplified Specification V2.0)
+         * Handle as illegal command but do not complain
+         * on stderr, as some OSes may use these in their
+         * probing for presence of an SDIO card.
+         */
+        sd->card_status |= ILLEGAL_COMMAND;
+        return sd_r0;
+
     /* Application specific commands (Class 8) */
     case 55:	/* CMD55:  APP_CMD */
         if (sd->rca != rca)
@@ -1139,12 +1160,8 @@ static sd_rsp_type_t sd_normal_command(SDState *sd,
 }
 
 static sd_rsp_type_t sd_app_command(SDState *sd,
-                                    SDRequest req) {
-    uint32_t rca;
-
-    if (sd_cmd_type[req.cmd] == sd_ac || sd_cmd_type[req.cmd] == sd_adtc)
-        rca = req.arg >> 16;
-
+                                    SDRequest req)
+{
     DPRINTF("ACMD%d 0x%08x\n", req.cmd, req.arg);
     switch (req.cmd) {
     case 6:	/* ACMD6:  SET_BUS_WIDTH */
@@ -1162,6 +1179,7 @@ static sd_rsp_type_t sd_app_command(SDState *sd,
     case 13:	/* ACMD13: SD_STATUS */
         switch (sd->state) {
         case sd_transfer_state:
+            sd->state = sd_sendingdata_state;
             sd->data_start = 0;
             sd->data_offset = 0;
             return sd_r1;
@@ -1176,6 +1194,7 @@ static sd_rsp_type_t sd_app_command(SDState *sd,
         case sd_transfer_state:
             *(uint32_t *) sd->data = sd->blk_written;
 
+            sd->state = sd_sendingdata_state;
             sd->data_start = 0;
             sd->data_offset = 0;
             return sd_r1;

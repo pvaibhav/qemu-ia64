@@ -13,9 +13,8 @@
 
 # include "hw.h"
 # include "flash.h"
-# include "block.h"
+# include "blockdev.h"
 /* FIXME: Pass block device as an argument.  */
-# include "sysemu.h"
 
 # define NAND_CMD_READ0		0x00
 # define NAND_CMD_READ1		0x01
@@ -53,7 +52,7 @@ struct NANDFlashState {
     BlockDriverState *bdrv;
     int mem_oob;
 
-    int cle, ale, ce, wp, gnd;
+    uint8_t cle, ale, ce, wp, gnd;
 
     uint8_t io[MAX_PAGE + MAX_OOB + 0x400];
     uint8_t *ioaddr;
@@ -67,6 +66,8 @@ struct NANDFlashState {
     void (*blk_write)(NANDFlashState *s);
     void (*blk_erase)(NANDFlashState *s);
     void (*blk_load)(NANDFlashState *s, uint32_t addr, int offset);
+
+    uint32_t ioaddr_vmstate;
 };
 
 # define NAND_NO_AUTOINCR	0x00000001
@@ -212,6 +213,7 @@ static void nand_reset(NANDFlashState *s)
 
 static void nand_command(NANDFlashState *s)
 {
+    unsigned int offset;
     switch (s->cmd) {
     case NAND_CMD_READ0:
         s->iolen = 0;
@@ -233,8 +235,12 @@ static void nand_command(NANDFlashState *s)
     case NAND_CMD_NOSERIALREAD2:
         if (!(nand_flash_ids[s->chip_id].options & NAND_SAMSUNG_LP))
             break;
-
-        s->blk_load(s, s->addr, s->addr & ((1 << s->addr_shift) - 1));
+        offset = s->addr & ((1 << s->addr_shift) - 1);
+        s->blk_load(s, s->addr, offset);
+        if (s->gnd)
+            s->iolen = (1 << s->page_shift) - offset;
+        else
+            s->iolen = (1 << s->page_shift) + (1 << s->oob_shift) - offset;
         break;
 
     case NAND_CMD_RESET:
@@ -277,47 +283,50 @@ static void nand_command(NANDFlashState *s)
     }
 }
 
-static void nand_save(QEMUFile *f, void *opaque)
+static void nand_pre_save(void *opaque)
 {
-    NANDFlashState *s = (NANDFlashState *) opaque;
-    qemu_put_byte(f, s->cle);
-    qemu_put_byte(f, s->ale);
-    qemu_put_byte(f, s->ce);
-    qemu_put_byte(f, s->wp);
-    qemu_put_byte(f, s->gnd);
-    qemu_put_buffer(f, s->io, sizeof(s->io));
-    qemu_put_be32(f, s->ioaddr - s->io);
-    qemu_put_be32(f, s->iolen);
+    NANDFlashState *s = opaque;
 
-    qemu_put_be32s(f, &s->cmd);
-    qemu_put_be32s(f, &s->addr);
-    qemu_put_be32(f, s->addrlen);
-    qemu_put_be32(f, s->status);
-    qemu_put_be32(f, s->offset);
-    /* XXX: do we want to save s->storage too? */
+    s->ioaddr_vmstate = s->ioaddr - s->io;
 }
 
-static int nand_load(QEMUFile *f, void *opaque, int version_id)
+static int nand_post_load(void *opaque, int version_id)
 {
-    NANDFlashState *s = (NANDFlashState *) opaque;
-    s->cle = qemu_get_byte(f);
-    s->ale = qemu_get_byte(f);
-    s->ce = qemu_get_byte(f);
-    s->wp = qemu_get_byte(f);
-    s->gnd = qemu_get_byte(f);
-    qemu_get_buffer(f, s->io, sizeof(s->io));
-    s->ioaddr = s->io + qemu_get_be32(f);
-    s->iolen = qemu_get_be32(f);
-    if (s->ioaddr >= s->io + sizeof(s->io) || s->ioaddr < s->io)
-        return -EINVAL;
+    NANDFlashState *s = opaque;
 
-    qemu_get_be32s(f, &s->cmd);
-    qemu_get_be32s(f, &s->addr);
-    s->addrlen = qemu_get_be32(f);
-    s->status = qemu_get_be32(f);
-    s->offset = qemu_get_be32(f);
+    if (s->ioaddr_vmstate > sizeof(s->io)) {
+        return -EINVAL;
+    }
+    s->ioaddr = s->io + s->ioaddr_vmstate;
+
     return 0;
 }
+
+static const VMStateDescription vmstate_nand = {
+    .name = "nand",
+    .version_id = 0,
+    .minimum_version_id = 0,
+    .minimum_version_id_old = 0,
+    .pre_save = nand_pre_save,
+    .post_load = nand_post_load,
+    .fields      = (VMStateField[]) {
+        VMSTATE_UINT8(cle, NANDFlashState),
+        VMSTATE_UINT8(ale, NANDFlashState),
+        VMSTATE_UINT8(ce, NANDFlashState),
+        VMSTATE_UINT8(wp, NANDFlashState),
+        VMSTATE_UINT8(gnd, NANDFlashState),
+        VMSTATE_BUFFER(io, NANDFlashState),
+        VMSTATE_UINT32(ioaddr_vmstate, NANDFlashState),
+        VMSTATE_INT32(iolen, NANDFlashState),
+        VMSTATE_UINT32(cmd, NANDFlashState),
+        VMSTATE_UINT32(addr, NANDFlashState),
+        VMSTATE_INT32(addrlen, NANDFlashState),
+        VMSTATE_INT32(status, NANDFlashState),
+        VMSTATE_INT32(offset, NANDFlashState),
+        /* XXX: do we want to save s->storage too? */
+        VMSTATE_END_OF_LIST()
+    }
+};
 
 /*
  * Chip inputs are CLE, ALE, CE, WP, GND and eight I/O pins.  Chip
@@ -325,8 +334,8 @@ static int nand_load(QEMUFile *f, void *opaque, int version_id)
  *
  * CE, WP and R/B are active low.
  */
-void nand_setpins(NANDFlashState *s,
-                int cle, int ale, int ce, int wp, int gnd)
+void nand_setpins(NANDFlashState *s, uint8_t cle, uint8_t ale,
+                  uint8_t ce, uint8_t wp, uint8_t gnd)
 {
     s->cle = cle;
     s->ale = ale;
@@ -380,12 +389,15 @@ void nand_setio(NANDFlashState *s, uint8_t value)
 
         if (s->cmd != NAND_CMD_RANDOMREAD2) {
             s->addrlen = 0;
-            s->addr = 0;
         }
     }
 
     if (s->ale) {
-        s->addr |= value << (s->addrlen * 8);
+        unsigned int shift = s->addrlen * 8;
+        unsigned int mask = ~(0xff << shift);
+        unsigned int v = value << shift;
+
+        s->addr = (s->addr & mask) | v;
         s->addrlen ++;
 
         if (s->addrlen == 1 && s->cmd == NAND_CMD_READID)
@@ -435,6 +447,7 @@ uint8_t nand_getio(NANDFlashState *s)
         return 0;
 
     s->iolen --;
+    s->addr++;
     return *(s->ioaddr ++);
 }
 
@@ -494,7 +507,7 @@ NANDFlashState *nand_init(int manf_id, int chip_id)
        is used.  */
     s->ioaddr = s->io;
 
-    register_savevm("nand", -1, 0, nand_save, nand_load, s);
+    vmstate_register(NULL, -1, &vmstate_nand, s);
 
     return s;
 }
@@ -633,9 +646,6 @@ static void glue(nand_blk_load_, PAGE_SIZE)(NANDFlashState *s,
                         offset, PAGE_SIZE + OOB_SIZE - offset);
         s->ioaddr = s->io;
     }
-
-    s->addr &= PAGE_SIZE - 1;
-    s->addr += PAGE_SIZE;
 }
 
 static void glue(nand_init_, PAGE_SIZE)(NANDFlashState *s)

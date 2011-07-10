@@ -22,6 +22,8 @@
 
 #include "optionrom.h"
 
+#define BOOT_ROM_PRODUCT "Linux loader"
+
 BOOT_ROM_START
 
 run_linuxboot:
@@ -79,24 +81,21 @@ copy_kernel:
 	   mode, so let's get into 32 bit mode, write the kernel and jump
 	   back again. */
 
-	/* Set DS to SS+SP - 0x10, so we can write our GDT descriptor there */
-	mov		%ss, %eax
-	shl		$4, %eax
-	add		%esp, %eax
-	sub		$0x10, %eax
-	shr		$4, %eax
+	/* Reserve space on the stack for our GDT descriptor. */
+	mov		%esp, %ebp
+	sub		$16, %esp
 
 	/* Now create the GDT descriptor */
+	movw		$((3 * 8) - 1), -16(%bp)
 	mov		%cs, %eax
+	movzwl		%ax, %eax
 	shl		$4, %eax
-	movw		$((3 * 8) - 1), %bx
-	movw		%bx, %gs:0
-	movl		$gdt, %ebx
-	add		%eax, %ebx
-	movl		%ebx, %gs:2
+	addl		$gdt, %eax
+	movl		%eax, -14(%bp)
 
 	/* And load the GDT */
-	data32 lgdt	%gs:0
+	data32 lgdt	-16(%bp)
+	mov		%ebp, %esp
 
 	/* Get us to protected mode now */
 	mov		$1, %eax
@@ -109,10 +108,10 @@ copy_kernel:
 	/* We're now running in 16-bit CS, but 32-bit ES! */
 
 	/* Load kernel and initrd */
-	read_fw_blob(FW_CFG_KERNEL)
-	read_fw_blob(FW_CFG_INITRD)
-	read_fw_blob(FW_CFG_CMDLINE)
-	read_fw_blob(FW_CFG_SETUP)
+	read_fw_blob_addr32(FW_CFG_KERNEL)
+	read_fw_blob_addr32(FW_CFG_INITRD)
+	read_fw_blob_addr32(FW_CFG_CMDLINE)
+	read_fw_blob_addr32(FW_CFG_SETUP)
 
 	/* And now jump into Linux! */
 	mov		$0, %eax

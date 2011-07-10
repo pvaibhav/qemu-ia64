@@ -4,7 +4,6 @@
 #include "xen_common.h"
 #include "sysemu.h"
 #include "net.h"
-#include "block_int.h"
 
 /* ------------------------------------------------------------- */
 
@@ -46,8 +45,8 @@ struct XenDevice {
     int                remote_port;
     int                local_port;
 
-    int                evtchndev;
-    int                gnttabdev;
+    XenEvtchn          evtchndev;
+    XenGnttab          gnttabdev;
 
     struct XenDevOps   *ops;
     QTAILQ_ENTRY(XenDevice) next;
@@ -56,7 +55,7 @@ struct XenDevice {
 /* ------------------------------------------------------------- */
 
 /* variables */
-extern int xen_xc;
+extern XenXC xen_xc;
 extern struct xs_handle *xenstore;
 extern const char *xen_protocol;
 
@@ -85,7 +84,7 @@ int xen_be_bind_evtchn(struct XenDevice *xendev);
 void xen_be_unbind_evtchn(struct XenDevice *xendev);
 int xen_be_send_notify(struct XenDevice *xendev);
 void xen_be_printf(struct XenDevice *xendev, int msg_level, const char *fmt, ...)
-    __attribute__ ((format(printf, 3, 4)));
+    GCC_FMT_ATTR(3, 4);
 
 /* actual backend drivers */
 extern struct XenDevOps xen_console_ops;      /* xen_console.c     */

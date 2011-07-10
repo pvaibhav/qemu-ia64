@@ -30,14 +30,12 @@
 
 #define BIOS_SIZE     (1024 * 1024)
 #define BIOS_FILENAME "ppc_rom.bin"
-#define VGABIOS_FILENAME "video.x"
 #define NVRAM_SIZE        0x2000
 #define PROM_FILENAME    "openbios-ppc"
 #define PROM_ADDR         0xfff00000
 
 #define KERNEL_LOAD_ADDR 0x01000000
-#define CMDLINE_ADDR     0x027ff000
-#define INITRD_LOAD_ADDR 0x02800000
+#define KERNEL_GAP       0x00100000
 
 #define ESCC_CLOCK 3686400
 
@@ -58,6 +56,7 @@ PCIBus *pci_grackle_init(uint32_t base, qemu_irq *pic);
 
 /* UniNorth PCI */
 PCIBus *pci_pmac_init(qemu_irq *pic);
+PCIBus *pci_pmac_u3_init(qemu_irq *pic);
 
 /* Mac NVRAM */
 typedef struct MacIONVRAMState MacIONVRAMState;

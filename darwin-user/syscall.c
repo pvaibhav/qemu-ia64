@@ -858,7 +858,7 @@ long no_syscall(void *cpu_env, int num);
 
 long do_pread(uint32_t arg1, void * arg2, size_t arg3, off_t arg4)
 {
-    DPRINTF("0x%x, %p, 0x%lx, 0x%llx\n", arg1, arg2, arg3, arg4);
+    DPRINTF("0x%x, %p, 0x%lx, 0x%" PRIx64 "\n", arg1, arg2, arg3, arg4);
     long ret = pread(arg1, arg2, arg3, arg4);
     return ret;
 }
@@ -977,7 +977,7 @@ long do_unix_syscall_indirect(void *cpu_env, int num)
 #elif TARGET_PPC
     {
         int i;
-        /* XXX: not really needed those regs are volatile accross calls */
+        /* XXX: not really needed those regs are volatile across calls */
         uint32_t **regs = ((CPUPPCState*)cpu_env)->gpr;
         for(i = 11; i > 3; i--)
             *regs[i] = *regs[i-1];

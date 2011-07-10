@@ -165,6 +165,10 @@ typedef struct DBDMA_channel {
     int processing;
 } DBDMA_channel;
 
+typedef struct {
+    DBDMA_channel channels[DBDMA_CHANNELS];
+} DBDMAState;
+
 #ifdef DEBUG_DBDMA
 static void dump_dbdma_cmd(dbdma_cmd *cmd)
 {
@@ -184,19 +188,19 @@ static void dump_dbdma_cmd(dbdma_cmd *cmd)
 static void dbdma_cmdptr_load(DBDMA_channel *ch)
 {
     DBDMA_DPRINTF("dbdma_cmdptr_load 0x%08x\n",
-                  be32_to_cpu(ch->regs[DBDMA_CMDPTR_LO]));
-    cpu_physical_memory_read(be32_to_cpu(ch->regs[DBDMA_CMDPTR_LO]),
+                  ch->regs[DBDMA_CMDPTR_LO]);
+    cpu_physical_memory_read(ch->regs[DBDMA_CMDPTR_LO],
                              (uint8_t*)&ch->current, sizeof(dbdma_cmd));
 }
 
 static void dbdma_cmdptr_save(DBDMA_channel *ch)
 {
     DBDMA_DPRINTF("dbdma_cmdptr_save 0x%08x\n",
-                  be32_to_cpu(ch->regs[DBDMA_CMDPTR_LO]));
+                  ch->regs[DBDMA_CMDPTR_LO]);
     DBDMA_DPRINTF("xfer_status 0x%08x res_count 0x%04x\n",
                   le16_to_cpu(ch->current.xfer_status),
                   le16_to_cpu(ch->current.res_count));
-    cpu_physical_memory_write(be32_to_cpu(ch->regs[DBDMA_CMDPTR_LO]),
+    cpu_physical_memory_write(ch->regs[DBDMA_CMDPTR_LO],
                               (uint8_t*)&ch->current, sizeof(dbdma_cmd));
 }
 
@@ -204,8 +208,8 @@ static void kill_channel(DBDMA_channel *ch)
 {
     DBDMA_DPRINTF("kill_channel\n");
 
-    ch->regs[DBDMA_STATUS] |= cpu_to_be32(DEAD);
-    ch->regs[DBDMA_STATUS] &= cpu_to_be32(~ACTIVE);
+    ch->regs[DBDMA_STATUS] |= DEAD;
+    ch->regs[DBDMA_STATUS] &= ~ACTIVE;
 
     qemu_irq_raise(ch->irq);
 }
@@ -230,10 +234,10 @@ static void conditional_interrupt(DBDMA_channel *ch)
         return;
     }
 
-    status = be32_to_cpu(ch->regs[DBDMA_STATUS]) & DEVSTAT;
+    status = ch->regs[DBDMA_STATUS] & DEVSTAT;
 
-    sel_mask = (be32_to_cpu(ch->regs[DBDMA_INTR_SEL]) >> 16) & 0x0f;
-    sel_value = be32_to_cpu(ch->regs[DBDMA_INTR_SEL]) & 0x0f;
+    sel_mask = (ch->regs[DBDMA_INTR_SEL] >> 16) & 0x0f;
+    sel_value = ch->regs[DBDMA_INTR_SEL] & 0x0f;
 
     cond = (status & sel_mask) == (sel_value & sel_mask);
 
@@ -268,10 +272,10 @@ static int conditional_wait(DBDMA_channel *ch)
         return 1;
     }
 
-    status = be32_to_cpu(ch->regs[DBDMA_STATUS]) & DEVSTAT;
+    status = ch->regs[DBDMA_STATUS] & DEVSTAT;
 
-    sel_mask = (be32_to_cpu(ch->regs[DBDMA_WAIT_SEL]) >> 16) & 0x0f;
-    sel_value = be32_to_cpu(ch->regs[DBDMA_WAIT_SEL]) & 0x0f;
+    sel_mask = (ch->regs[DBDMA_WAIT_SEL] >> 16) & 0x0f;
+    sel_value = ch->regs[DBDMA_WAIT_SEL] & 0x0f;
 
     cond = (status & sel_mask) == (sel_value & sel_mask);
 
@@ -292,10 +296,10 @@ static void next(DBDMA_channel *ch)
 {
     uint32_t cp;
 
-    ch->regs[DBDMA_STATUS] &= cpu_to_be32(~BT);
+    ch->regs[DBDMA_STATUS] &= ~BT;
 
-    cp = be32_to_cpu(ch->regs[DBDMA_CMDPTR_LO]);
-    ch->regs[DBDMA_CMDPTR_LO] = cpu_to_be32(cp + sizeof(dbdma_cmd));
+    cp = ch->regs[DBDMA_CMDPTR_LO];
+    ch->regs[DBDMA_CMDPTR_LO] = cp + sizeof(dbdma_cmd);
     dbdma_cmdptr_load(ch);
 }
 
@@ -304,7 +308,7 @@ static void branch(DBDMA_channel *ch)
     dbdma_cmd *current = &ch->current;
 
     ch->regs[DBDMA_CMDPTR_LO] = current->cmd_dep;
-    ch->regs[DBDMA_STATUS] |= cpu_to_be32(BT);
+    ch->regs[DBDMA_STATUS] |= BT;
     dbdma_cmdptr_load(ch);
 }
 
@@ -331,10 +335,10 @@ static void conditional_branch(DBDMA_channel *ch)
         return;
     }
 
-    status = be32_to_cpu(ch->regs[DBDMA_STATUS]) & DEVSTAT;
+    status = ch->regs[DBDMA_STATUS] & DEVSTAT;
 
-    sel_mask = (be32_to_cpu(ch->regs[DBDMA_BRANCH_SEL]) >> 16) & 0x0f;
-    sel_value = be32_to_cpu(ch->regs[DBDMA_BRANCH_SEL]) & 0x0f;
+    sel_mask = (ch->regs[DBDMA_BRANCH_SEL] >> 16) & 0x0f;
+    sel_value = ch->regs[DBDMA_BRANCH_SEL] & 0x0f;
 
     cond = (status & sel_mask) == (sel_value & sel_mask);
 
@@ -365,19 +369,19 @@ static void dbdma_end(DBDMA_io *io)
     if (conditional_wait(ch))
         goto wait;
 
-    current->xfer_status = cpu_to_le16(be32_to_cpu(ch->regs[DBDMA_STATUS]));
-    current->res_count = cpu_to_le16(be32_to_cpu(io->len));
+    current->xfer_status = cpu_to_le16(ch->regs[DBDMA_STATUS]);
+    current->res_count = cpu_to_le16(io->len);
     dbdma_cmdptr_save(ch);
     if (io->is_last)
-        ch->regs[DBDMA_STATUS] &= cpu_to_be32(~FLUSH);
+        ch->regs[DBDMA_STATUS] &= ~FLUSH;
 
     conditional_interrupt(ch);
     conditional_branch(ch);
 
 wait:
     ch->processing = 0;
-    if ((ch->regs[DBDMA_STATUS] & cpu_to_be32(RUN)) &&
-        (ch->regs[DBDMA_STATUS] & cpu_to_be32(ACTIVE)))
+    if ((ch->regs[DBDMA_STATUS] & RUN) &&
+        (ch->regs[DBDMA_STATUS] & ACTIVE))
         channel_run(ch);
 }
 
@@ -402,7 +406,9 @@ static void start_output(DBDMA_channel *ch, int key, uint32_t addr,
     ch->io.dma_end = dbdma_end;
     ch->io.is_dma_out = 1;
     ch->processing = 1;
-    ch->rw(&ch->io);
+    if (ch->rw) {
+        ch->rw(&ch->io);
+    }
 }
 
 static void start_input(DBDMA_channel *ch, int key, uint32_t addr,
@@ -425,7 +431,9 @@ static void start_input(DBDMA_channel *ch, int key, uint32_t addr,
     ch->io.dma_end = dbdma_end;
     ch->io.is_dma_out = 0;
     ch->processing = 1;
-    ch->rw(&ch->io);
+    if (ch->rw) {
+        ch->rw(&ch->io);
+    }
 }
 
 static void load_word(DBDMA_channel *ch, int key, uint32_t addr,
@@ -456,9 +464,9 @@ static void load_word(DBDMA_channel *ch, int key, uint32_t addr,
     if (conditional_wait(ch))
         goto wait;
 
-    current->xfer_status = cpu_to_le16(be32_to_cpu(ch->regs[DBDMA_STATUS]));
+    current->xfer_status = cpu_to_le16(ch->regs[DBDMA_STATUS]);
     dbdma_cmdptr_save(ch);
-    ch->regs[DBDMA_STATUS] &= cpu_to_be32(~FLUSH);
+    ch->regs[DBDMA_STATUS] &= ~FLUSH;
 
     conditional_interrupt(ch);
     next(ch);
@@ -494,9 +502,9 @@ static void store_word(DBDMA_channel *ch, int key, uint32_t addr,
     if (conditional_wait(ch))
         goto wait;
 
-    current->xfer_status = cpu_to_le16(be32_to_cpu(ch->regs[DBDMA_STATUS]));
+    current->xfer_status = cpu_to_le16(ch->regs[DBDMA_STATUS]);
     dbdma_cmdptr_save(ch);
-    ch->regs[DBDMA_STATUS] &= cpu_to_be32(~FLUSH);
+    ch->regs[DBDMA_STATUS] &= ~FLUSH;
 
     conditional_interrupt(ch);
     next(ch);
@@ -512,7 +520,7 @@ static void nop(DBDMA_channel *ch)
     if (conditional_wait(ch))
         goto wait;
 
-    current->xfer_status = cpu_to_le16(be32_to_cpu(ch->regs[DBDMA_STATUS]));
+    current->xfer_status = cpu_to_le16(ch->regs[DBDMA_STATUS]);
     dbdma_cmdptr_save(ch);
 
     conditional_interrupt(ch);
@@ -524,7 +532,7 @@ wait:
 
 static void stop(DBDMA_channel *ch)
 {
-    ch->regs[DBDMA_STATUS] &= cpu_to_be32(~(ACTIVE|DEAD|FLUSH));
+    ch->regs[DBDMA_STATUS] &= ~(ACTIVE|DEAD|FLUSH);
 
     /* the stop command does not increment command pointer */
 }
@@ -541,7 +549,7 @@ static void channel_run(DBDMA_channel *ch)
 
     /* clear WAKE flag at command fetch */
 
-    ch->regs[DBDMA_STATUS] &= cpu_to_be32(~WAKE);
+    ch->regs[DBDMA_STATUS] &= ~WAKE;
 
     cmd = le16_to_cpu(current->command) & COMMAND_MASK;
 
@@ -613,31 +621,34 @@ static void channel_run(DBDMA_channel *ch)
     }
 }
 
-static void DBDMA_run (DBDMA_channel *ch)
+static void DBDMA_run(DBDMAState *s)
 {
     int channel;
 
-    for (channel = 0; channel < DBDMA_CHANNELS; channel++, ch++) {
-            uint32_t status = be32_to_cpu(ch->regs[DBDMA_STATUS]);
-            if (!ch->processing && (status & RUN) && (status & ACTIVE))
-                channel_run(ch);
+    for (channel = 0; channel < DBDMA_CHANNELS; channel++) {
+        DBDMA_channel *ch = &s->channels[channel];
+        uint32_t status = ch->regs[DBDMA_STATUS];
+        if (!ch->processing && (status & RUN) && (status & ACTIVE)) {
+            channel_run(ch);
+        }
     }
 }
 
 static void DBDMA_run_bh(void *opaque)
 {
-    DBDMA_channel *ch = opaque;
+    DBDMAState *s = opaque;
 
     DBDMA_DPRINTF("DBDMA_run_bh\n");
 
-    DBDMA_run(ch);
+    DBDMA_run(s);
 }
 
 void DBDMA_register_channel(void *dbdma, int nchan, qemu_irq irq,
                             DBDMA_rw rw, DBDMA_flush flush,
                             void *opaque)
 {
-    DBDMA_channel *ch = ( DBDMA_channel *)dbdma + nchan;
+    DBDMAState *s = dbdma;
+    DBDMA_channel *ch = &s->channels[nchan];
 
     DBDMA_DPRINTF("DBDMA_register_channel 0x%x\n", nchan);
 
@@ -660,12 +671,12 @@ dbdma_control_write(DBDMA_channel *ch)
     uint16_t mask, value;
     uint32_t status;
 
-    mask = (be32_to_cpu(ch->regs[DBDMA_CONTROL]) >> 16) & 0xffff;
-    value = be32_to_cpu(ch->regs[DBDMA_CONTROL]) & 0xffff;
+    mask = (ch->regs[DBDMA_CONTROL] >> 16) & 0xffff;
+    value = ch->regs[DBDMA_CONTROL] & 0xffff;
 
     value &= (RUN | PAUSE | FLUSH | WAKE | DEVSTAT);
 
-    status = be32_to_cpu(ch->regs[DBDMA_STATUS]);
+    status = ch->regs[DBDMA_STATUS];
 
     status = (value & mask) | (status & ~mask);
 
@@ -677,18 +688,18 @@ dbdma_control_write(DBDMA_channel *ch)
     }
     if (status & PAUSE)
         status &= ~ACTIVE;
-    if ((be32_to_cpu(ch->regs[DBDMA_STATUS]) & RUN) && !(status & RUN)) {
+    if ((ch->regs[DBDMA_STATUS] & RUN) && !(status & RUN)) {
         /* RUN is cleared */
         status &= ~(ACTIVE|DEAD);
     }
 
     DBDMA_DPRINTF("    status 0x%08x\n", status);
 
-    ch->regs[DBDMA_STATUS] = cpu_to_be32(status);
+    ch->regs[DBDMA_STATUS] = status;
 
     if (status & ACTIVE)
         qemu_bh_schedule(dbdma_bh);
-    if (status & FLUSH)
+    if ((status & FLUSH) && ch->flush)
         ch->flush(&ch->io);
 }
 
@@ -696,7 +707,8 @@ static void dbdma_writel (void *opaque,
                           target_phys_addr_t addr, uint32_t value)
 {
     int channel = addr >> DBDMA_CHANNEL_SHIFT;
-    DBDMA_channel *ch = (DBDMA_channel *)opaque + channel;
+    DBDMAState *s = opaque;
+    DBDMA_channel *ch = &s->channels[channel];
     int reg = (addr - (channel << DBDMA_CHANNEL_SHIFT)) >> 2;
 
     DBDMA_DPRINTF("writel 0x" TARGET_FMT_plx " <= 0x%08x\n", addr, value);
@@ -706,7 +718,7 @@ static void dbdma_writel (void *opaque,
     /* cmdptr cannot be modified if channel is RUN or ACTIVE */
 
     if (reg == DBDMA_CMDPTR_LO &&
-        (ch->regs[DBDMA_STATUS] & cpu_to_be32(RUN | ACTIVE)))
+        (ch->regs[DBDMA_STATUS] & (RUN | ACTIVE)))
 	return;
 
     ch->regs[reg] = value;
@@ -717,7 +729,7 @@ static void dbdma_writel (void *opaque,
         break;
     case DBDMA_CMDPTR_LO:
         /* 16-byte aligned */
-        ch->regs[DBDMA_CMDPTR_LO] &= cpu_to_be32(~0xf);
+        ch->regs[DBDMA_CMDPTR_LO] &= ~0xf;
         dbdma_cmdptr_load(ch);
         break;
     case DBDMA_STATUS:
@@ -745,7 +757,8 @@ static uint32_t dbdma_readl (void *opaque, target_phys_addr_t addr)
 {
     uint32_t value;
     int channel = addr >> DBDMA_CHANNEL_SHIFT;
-    DBDMA_channel *ch = (DBDMA_channel *)opaque + channel;
+    DBDMAState *s = opaque;
+    DBDMA_channel *ch = &s->channels[channel];
     int reg = (addr - (channel << DBDMA_CHANNEL_SHIFT)) >> 2;
 
     value = ch->regs[reg];
@@ -797,48 +810,47 @@ static CPUReadMemoryFunc * const dbdma_read[] = {
     dbdma_readl,
 };
 
-static void dbdma_save(QEMUFile *f, void *opaque)
-{
-    DBDMA_channel *s = opaque;
-    unsigned int i, j;
+static const VMStateDescription vmstate_dbdma_channel = {
+    .name = "dbdma_channel",
+    .version_id = 0,
+    .minimum_version_id = 0,
+    .minimum_version_id_old = 0,
+    .fields      = (VMStateField[]) {
+        VMSTATE_UINT32_ARRAY(regs, struct DBDMA_channel, DBDMA_REGS),
+        VMSTATE_END_OF_LIST()
+    }
+};
 
-    for (i = 0; i < DBDMA_CHANNELS; i++)
-        for (j = 0; j < DBDMA_REGS; j++)
-            qemu_put_be32s(f, &s[i].regs[j]);
-}
-
-static int dbdma_load(QEMUFile *f, void *opaque, int version_id)
-{
-    DBDMA_channel *s = opaque;
-    unsigned int i, j;
-
-    if (version_id != 2)
-        return -EINVAL;
-
-    for (i = 0; i < DBDMA_CHANNELS; i++)
-        for (j = 0; j < DBDMA_REGS; j++)
-            qemu_get_be32s(f, &s[i].regs[j]);
-
-    return 0;
-}
+static const VMStateDescription vmstate_dbdma = {
+    .name = "dbdma",
+    .version_id = 2,
+    .minimum_version_id = 2,
+    .minimum_version_id_old = 2,
+    .fields      = (VMStateField[]) {
+        VMSTATE_STRUCT_ARRAY(channels, DBDMAState, DBDMA_CHANNELS, 1,
+                             vmstate_dbdma_channel, DBDMA_channel),
+        VMSTATE_END_OF_LIST()
+    }
+};
 
 static void dbdma_reset(void *opaque)
 {
-    DBDMA_channel *s = opaque;
+    DBDMAState *s = opaque;
     int i;
 
     for (i = 0; i < DBDMA_CHANNELS; i++)
-        memset(s[i].regs, 0, DBDMA_SIZE);
+        memset(s->channels[i].regs, 0, DBDMA_SIZE);
 }
 
 void* DBDMA_init (int *dbdma_mem_index)
 {
-    DBDMA_channel *s;
+    DBDMAState *s;
 
-    s = qemu_mallocz(sizeof(DBDMA_channel) * DBDMA_CHANNELS);
+    s = qemu_mallocz(sizeof(DBDMAState));
 
-    *dbdma_mem_index = cpu_register_io_memory(dbdma_read, dbdma_write, s);
-    register_savevm("dbdma", -1, 1, dbdma_save, dbdma_load, s);
+    *dbdma_mem_index = cpu_register_io_memory(dbdma_read, dbdma_write, s,
+                                              DEVICE_LITTLE_ENDIAN);
+    vmstate_register(NULL, -1, &vmstate_dbdma, s);
     qemu_register_reset(dbdma_reset, s);
 
     dbdma_bh = qemu_bh_new(DBDMA_run_bh, s);

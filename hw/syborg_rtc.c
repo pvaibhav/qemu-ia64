@@ -66,7 +66,7 @@ static void syborg_rtc_write(void *opaque, target_phys_addr_t offset, uint32_t v
     offset &= 0xfff;
     switch (offset >> 2) {
     case RTC_LATCH:
-        now = qemu_get_clock(vm_clock);
+        now = qemu_get_clock_ns(vm_clock);
         if (value >= 4) {
             s->offset = s->data - now;
         } else {
@@ -102,26 +102,17 @@ static CPUWriteMemoryFunc * const syborg_rtc_writefn[] = {
     syborg_rtc_write
 };
 
-static void syborg_rtc_save(QEMUFile *f, void *opaque)
-{
-    SyborgRTCState *s = opaque;
-
-    qemu_put_be64(f, s->offset);
-    qemu_put_be64(f, s->data);
-}
-
-static int syborg_rtc_load(QEMUFile *f, void *opaque, int version_id)
-{
-    SyborgRTCState *s = opaque;
-
-    if (version_id != 1)
-        return -EINVAL;
-
-    s->offset = qemu_get_be64(f);
-    s->data = qemu_get_be64(f);
-
-    return 0;
-}
+static const VMStateDescription vmstate_syborg_rtc = {
+    .name = "syborg_keyboard",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .minimum_version_id_old = 1,
+    .fields      = (VMStateField[]) {
+        VMSTATE_INT64(offset, SyborgRTCState),
+        VMSTATE_INT64(data, SyborgRTCState),
+        VMSTATE_END_OF_LIST()
+    }
+};
 
 static int syborg_rtc_init(SysBusDevice *dev)
 {
@@ -130,13 +121,14 @@ static int syborg_rtc_init(SysBusDevice *dev)
     int iomemtype;
 
     iomemtype = cpu_register_io_memory(syborg_rtc_readfn,
-                                       syborg_rtc_writefn, s);
+                                       syborg_rtc_writefn, s,
+                                       DEVICE_NATIVE_ENDIAN);
     sysbus_init_mmio(dev, 0x1000, iomemtype);
 
     qemu_get_timedate(&tm, 0);
     s->offset = (uint64_t)mktime(&tm) * 1000000000;
 
-    register_savevm("syborg_rtc", -1, 1, syborg_rtc_save, syborg_rtc_load, s);
+    vmstate_register(&dev->qdev, -1, &vmstate_syborg_rtc, s);
     return 0;
 }
 

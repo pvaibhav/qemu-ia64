@@ -36,6 +36,9 @@
 #define EXCP_IRQ        4
 #define EXCP_BREAK      5
 
+/* CRIS-specific interrupt pending bits.  */
+#define CPU_INTERRUPT_NMI       CPU_INTERRUPT_TGT_EXT_3
+
 /* Register aliases. R0 - R15 */
 #define R_FP  8
 #define R_SP  14
@@ -49,6 +52,7 @@
 #define PR_WZ  4
 #define PR_EXS 5
 #define PR_EDA 6
+#define PR_PREFIX 6    /* On CRISv10 P6 is reserved, we use it as prefix.  */
 #define PR_MOF 7
 #define PR_DZ  8
 #define PR_EBP 9
@@ -62,6 +66,7 @@
 /* CPU flags.  */
 #define Q_FLAG 0x80000000
 #define M_FLAG 0x40000000
+#define PFIX_FLAG 0x800      /* CRISv10 Only.  */
 #define S_FLAG 0x200
 #define R_FLAG 0x100
 #define P_FLAG 0x80
@@ -99,7 +104,7 @@ typedef struct CPUCRISState {
 	/* P0 - P15 are referred to as special registers in the docs.  */
 	uint32_t pregs[16];
 
-	/* Pseudo register for the PC. Not directly accessable on CRIS.  */
+	/* Pseudo register for the PC. Not directly accessible on CRIS.  */
 	uint32_t pc;
 
 	/* Pseudo register for the kernel stack.  */
@@ -121,6 +126,8 @@ typedef struct CPUCRISState {
 	/* X flag at the time of cc snapshot.  */
 	int cc_x;
 
+	/* CRIS has certain insns that lockout interrupts.  */
+	int locked_irq;
 	int interrupt_vector;
 	int fault_vector;
 	int trap_vector;
@@ -152,6 +159,9 @@ typedef struct CPUCRISState {
 	} tlbsets[2][4][16];
 
 	CPU_COMMON
+
+	/* Members after CPU_COMMON are preserved across resets.  */
+	void *load_info;
 } CPUCRISState;
 
 CPUCRISState *cpu_cris_init(const char *cpu_model);
@@ -180,6 +190,7 @@ enum {
     CC_OP_MULS,
     CC_OP_MULU,
     CC_OP_DSTEP,
+    CC_OP_MSTEP,
     CC_OP_BOUND,
 
     CC_OP_OR,
@@ -194,6 +205,9 @@ enum {
 /* CRIS uses 8k pages.  */
 #define TARGET_PAGE_BITS 13
 #define MMAP_SHIFT TARGET_PAGE_BITS
+
+#define TARGET_PHYS_ADDR_SPACE_BITS 32
+#define TARGET_VIRT_ADDR_SPACE_BITS 32
 
 #define cpu_init cpu_cris_init
 #define cpu_exec cpu_cris_exec
@@ -240,12 +254,6 @@ static inline void cpu_set_tls(CPUCRISState *env, target_ulong newtls)
 #define SFR_RW_MM_TLB_HI   env->pregs[PR_SRS]][6
 
 #include "cpu-all.h"
-#include "exec-all.h"
-
-static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
-{
-    env->pc = tb->pc;
-}
 
 static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
                                         target_ulong *cs_base, int *flags)
@@ -253,7 +261,22 @@ static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
     *pc = env->pc;
     *cs_base = 0;
     *flags = env->dslot |
-            (env->pregs[PR_CCS] & (S_FLAG | P_FLAG | U_FLAG | X_FLAG));
+            (env->pregs[PR_CCS] & (S_FLAG | P_FLAG | U_FLAG
+				     | X_FLAG | PFIX_FLAG));
 }
 
+#define cpu_list cris_cpu_list
+void cris_cpu_list(FILE *f, fprintf_function cpu_fprintf);
+
+static inline bool cpu_has_work(CPUState *env)
+{
+    return env->interrupt_request & (CPU_INTERRUPT_HARD | CPU_INTERRUPT_NMI);
+}
+
+#include "exec-all.h"
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->pc = tb->pc;
+}
 #endif

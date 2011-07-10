@@ -24,6 +24,7 @@
 #include "qemu-timer.h"
 #include "usb.h"
 #include "irq.h"
+#include "hw.h"
 
 /* Common USB registers */
 #define MUSB_HDRC_FADDR		0x00	/* 8-bit */
@@ -248,9 +249,41 @@
 #define MGC_M_ULPI_REGCTL_COMPLETE	0x02
 #define MGC_M_ULPI_REGCTL_REG		0x01
 
-static void musb_attach(USBPort *port, USBDevice *dev);
+/* #define MUSB_DEBUG */
 
-typedef struct {
+#ifdef MUSB_DEBUG
+#define TRACE(fmt,...) fprintf(stderr, "%s@%d: " fmt "\n", __FUNCTION__, \
+                               __LINE__, ##__VA_ARGS__)
+#else
+#define TRACE(...)
+#endif
+
+
+static void musb_attach(USBPort *port);
+static void musb_detach(USBPort *port);
+static void musb_schedule_cb(USBDevice *dev, USBPacket *p);
+static void musb_device_destroy(USBBus *bus, USBDevice *dev);
+
+static USBPortOps musb_port_ops = {
+    .attach = musb_attach,
+    .detach = musb_detach,
+    .complete = musb_schedule_cb,
+};
+
+static USBBusOps musb_bus_ops = {
+    .device_destroy = musb_device_destroy,
+};
+
+typedef struct MUSBPacket MUSBPacket;
+typedef struct MUSBEndPoint MUSBEndPoint;
+
+struct MUSBPacket {
+    USBPacket p;
+    MUSBEndPoint *ep;
+    int dir;
+};
+
+struct MUSBEndPoint {
     uint16_t faddr[2];
     uint8_t haddr[2];
     uint8_t hport[2];
@@ -263,11 +296,11 @@ typedef struct {
     uint8_t fifosize;
     int timeout[2];	/* Always in microframes */
 
-    uint32_t *buf[2];
+    uint8_t *buf[2];
     int fifolen[2];
     int fifostart[2];
     int fifoaddr[2];
-    USBPacket packey[2];
+    MUSBPacket packey[2];
     int status[2];
     int ext_size[2];
 
@@ -277,7 +310,7 @@ typedef struct {
     MUSBState *musb;
     USBCallback *delayed_cb[2];
     QEMUTimer *intv_timer[2];
-} MUSBEndPoint;
+};
 
 struct MUSBState {
     qemu_irq *irqs;
@@ -299,12 +332,14 @@ struct MUSBState {
     int setup_len;
     int session;
 
-    uint32_t buf[0x2000];
+    uint8_t buf[0x8000];
 
         /* Duplicating the world since 2008!...  probably we should have 32
          * logical, single endpoints instead.  */
     MUSBEndPoint ep[16];
-} *musb_init(qemu_irq *irqs)
+};
+
+struct MUSBState *musb_init(qemu_irq *irqs)
 {
     MUSBState *s = qemu_mallocz(sizeof(*s));
     int i;
@@ -331,8 +366,10 @@ struct MUSBState {
         s->ep[i].epnum = i;
     }
 
-    usb_bus_new(&s->bus, NULL /* FIXME */);
-    usb_register_port(&s->bus, &s->port, s, 0, musb_attach);
+    usb_bus_new(&s->bus, &musb_bus_ops, NULL /* FIXME */);
+    usb_register_port(&s->bus, &s->port, s, 0, &musb_port_ops,
+                      USB_SPEED_MASK_LOW | USB_SPEED_MASK_FULL);
+    usb_port_location(&s->port, NULL, 1);
 
     return s;
 }
@@ -449,55 +486,43 @@ static void musb_session_update(MUSBState *s, int prev_dev, int prev_sess)
 }
 
 /* Attach or detach a device on our only port.  */
-static void musb_attach(USBPort *port, USBDevice *dev)
+static void musb_attach(USBPort *port)
 {
     MUSBState *s = (MUSBState *) port->opaque;
-    USBDevice *curr;
 
-    port = &s->port;
-    curr = port->dev;
-
-    if (dev) {
-        if (curr) {
-            usb_attach(port, NULL);
-            /* TODO: signal some interrupts */
-        }
-
-        musb_intr_set(s, musb_irq_vbus_request, 1);
-
-        /* Send the attach message to device */
-        usb_send_msg(dev, USB_MSG_ATTACH);
-    } else if (curr) {
-        /* Send the detach message */
-        usb_send_msg(curr, USB_MSG_DETACH);
-
-        musb_intr_set(s, musb_irq_disconnect, 1);
-    }
-
-    port->dev = dev;
-
-    musb_session_update(s, !!curr, s->session);
+    musb_intr_set(s, musb_irq_vbus_request, 1);
+    musb_session_update(s, 0, s->session);
 }
 
-static inline void musb_cb_tick0(void *opaque)
+static void musb_detach(USBPort *port)
+{
+    MUSBState *s = (MUSBState *) port->opaque;
+
+    musb_intr_set(s, musb_irq_disconnect, 1);
+    musb_session_update(s, 1, s->session);
+}
+
+static void musb_cb_tick0(void *opaque)
 {
     MUSBEndPoint *ep = (MUSBEndPoint *) opaque;
 
-    ep->delayed_cb[0](&ep->packey[0], opaque);
+    ep->delayed_cb[0](&ep->packey[0].p, opaque);
 }
 
-static inline void musb_cb_tick1(void *opaque)
+static void musb_cb_tick1(void *opaque)
 {
     MUSBEndPoint *ep = (MUSBEndPoint *) opaque;
 
-    ep->delayed_cb[1](&ep->packey[1], opaque);
+    ep->delayed_cb[1](&ep->packey[1].p, opaque);
 }
 
 #define musb_cb_tick	(dir ? musb_cb_tick1 : musb_cb_tick0)
 
-static inline void musb_schedule_cb(USBPacket *packey, void *opaque, int dir)
+static void musb_schedule_cb(USBDevice *dev, USBPacket *packey)
 {
-    MUSBEndPoint *ep = (MUSBEndPoint *) opaque;
+    MUSBPacket *p = container_of(packey, MUSBPacket, p);
+    MUSBEndPoint *ep = p->ep;
+    int dir = p->dir;
     int timeout = 0;
 
     if (ep->status[dir] == USB_RET_NAK)
@@ -505,23 +530,13 @@ static inline void musb_schedule_cb(USBPacket *packey, void *opaque, int dir)
     else if (ep->interrupt[dir])
         timeout = 8;
     else
-        return musb_cb_tick(opaque);
+        return musb_cb_tick(ep);
 
     if (!ep->intv_timer[dir])
-        ep->intv_timer[dir] = qemu_new_timer(vm_clock, musb_cb_tick, opaque);
+        ep->intv_timer[dir] = qemu_new_timer_ns(vm_clock, musb_cb_tick, ep);
 
-    qemu_mod_timer(ep->intv_timer[dir], qemu_get_clock(vm_clock) +
+    qemu_mod_timer(ep->intv_timer[dir], qemu_get_clock_ns(vm_clock) +
                    muldiv64(timeout, get_ticks_per_sec(), 8000));
-}
-
-static void musb_schedule0_cb(USBPacket *packey, void *opaque)
-{
-    return musb_schedule_cb(packey, opaque, 0);
-}
-
-static void musb_schedule1_cb(USBPacket *packey, void *opaque)
-{
-    return musb_schedule_cb(packey, opaque, 1);
 }
 
 static int musb_timeout(int ttype, int speed, int val)
@@ -562,7 +577,7 @@ static int musb_timeout(int ttype, int speed, int val)
     hw_error("bad interval\n");
 }
 
-static inline void musb_packet(MUSBState *s, MUSBEndPoint *ep,
+static void musb_packet(MUSBState *s, MUSBEndPoint *ep,
                 int epnum, int pid, int len, USBCallback cb, int dir)
 {
     int ret;
@@ -580,19 +595,18 @@ static inline void musb_packet(MUSBState *s, MUSBEndPoint *ep,
                     ep->type[idx] >> 6, ep->interval[idx]);
     ep->interrupt[dir] = ttype == USB_ENDPOINT_XFER_INT;
     ep->delayed_cb[dir] = cb;
-    cb = dir ? musb_schedule1_cb : musb_schedule0_cb;
 
-    ep->packey[dir].pid = pid;
+    ep->packey[dir].p.pid = pid;
     /* A wild guess on the FADDR semantics... */
-    ep->packey[dir].devaddr = ep->faddr[idx];
-    ep->packey[dir].devep = ep->type[idx] & 0xf;
-    ep->packey[dir].data = (void *) ep->buf[idx];
-    ep->packey[dir].len = len;
-    ep->packey[dir].complete_cb = cb;
-    ep->packey[dir].complete_opaque = ep;
+    ep->packey[dir].p.devaddr = ep->faddr[idx];
+    ep->packey[dir].p.devep = ep->type[idx] & 0xf;
+    ep->packey[dir].p.data = (void *) ep->buf[idx];
+    ep->packey[dir].p.len = len;
+    ep->packey[dir].ep = ep;
+    ep->packey[dir].dir = dir;
 
     if (s->port.dev)
-        ret = s->port.dev->info->handle_packet(s->port.dev, &ep->packey[dir]);
+        ret = usb_handle_packet(s->port.dev, &ep->packey[dir].p);
     else
         ret = USB_RET_NODEV;
 
@@ -602,7 +616,7 @@ static inline void musb_packet(MUSBState *s, MUSBEndPoint *ep,
     }
 
     ep->status[dir] = ret;
-    usb_packet_complete(&ep->packey[dir]);
+    usb_packet_complete(s->port.dev, &ep->packey[dir].p);
 }
 
 static void musb_tx_packet_complete(USBPacket *packey, void *opaque)
@@ -769,12 +783,28 @@ static void musb_rx_packet_complete(USBPacket *packey, void *opaque)
     musb_rx_intr_set(s, epnum, 1);
 }
 
+static void musb_device_destroy(USBBus *bus, USBDevice *dev)
+{
+    MUSBState *s = container_of(bus, MUSBState, bus);
+    int ep, dir;
+
+    for (ep = 0; ep < 16; ep++) {
+        for (dir = 0; dir < 2; dir++) {
+            if (s->ep[ep].packey[dir].p.owner != dev) {
+                continue;
+            }
+            usb_cancel_packet(&s->ep[ep].packey[dir].p);
+            /* status updates needed here? */
+        }
+    }
+}
+
 static void musb_tx_rdy(MUSBState *s, int epnum)
 {
     MUSBEndPoint *ep = s->ep + epnum;
     int pid;
     int total, valid = 0;
-
+    TRACE("start %d, len %d",  ep->fifostart[0], ep->fifolen[0] );
     ep->fifostart[0] += ep->fifolen[0];
     ep->fifolen[0] = 0;
 
@@ -789,18 +819,18 @@ static void musb_tx_rdy(MUSBState *s, int epnum)
     }
 
     /* If the packet is not fully ready yet, wait for a next segment.  */
-    if (epnum && (ep->fifostart[0] << 2) < total)
+    if (epnum && (ep->fifostart[0]) < total)
         return;
 
     if (!valid)
-        total = ep->fifostart[0] << 2;
+        total = ep->fifostart[0];
 
     pid = USB_TOKEN_OUT;
     if (!epnum && (ep->csr[0] & MGC_M_CSR0_H_SETUPPKT)) {
         pid = USB_TOKEN_SETUP;
-        if (total != 8)
-            printf("%s: illegal SETUPPKT length of %i bytes\n",
-                            __FUNCTION__, total);
+        if (total != 8) {
+            TRACE("illegal SETUPPKT length of %i bytes", total);
+        }
         /* Controller should retry SETUP packets three times on errors
          * but it doesn't make sense for us to do that.  */
     }
@@ -816,13 +846,14 @@ static void musb_rx_req(MUSBState *s, int epnum)
 
     /* If we already have a packet, which didn't fit into the
      * 64 bytes of the FIFO, only move the FIFO start and return. (Obsolete) */
-    if (ep->packey[1].pid == USB_TOKEN_IN && ep->status[1] >= 0 &&
-                    (ep->fifostart[1] << 2) + ep->rxcount <
-                    ep->packey[1].len) {
-        ep->fifostart[1] += ep->rxcount >> 2;
+    if (ep->packey[1].p.pid == USB_TOKEN_IN && ep->status[1] >= 0 &&
+                    (ep->fifostart[1]) + ep->rxcount <
+                    ep->packey[1].p.len) {
+        TRACE("0x%08x, %d",  ep->fifostart[1], ep->rxcount );
+        ep->fifostart[1] += ep->rxcount;
         ep->fifolen[1] = 0;
 
-        ep->rxcount = MIN(ep->packey[0].len - (ep->fifostart[1] << 2),
+        ep->rxcount = MIN(ep->packey[0].p.len - (ep->fifostart[1]),
                         ep->maxp[1]);
 
         ep->csr[1] &= ~MGC_M_RXCSR_H_REQPKT;
@@ -860,16 +891,47 @@ static void musb_rx_req(MUSBState *s, int epnum)
 #ifdef SETUPLEN_HACK
     /* Why should *we* do that instead of Linux?  */
     if (!epnum) {
-        if (ep->packey[0].devaddr == 2)
+        if (ep->packey[0].p.devaddr == 2) {
             total = MIN(s->setup_len, 8);
-        else
+        } else {
             total = MIN(s->setup_len, 64);
+        }
         s->setup_len -= total;
     }
 #endif
 
     return musb_packet(s, ep, epnum, USB_TOKEN_IN,
                     total, musb_rx_packet_complete, 1);
+}
+
+static uint8_t musb_read_fifo(MUSBEndPoint *ep)
+{
+    uint8_t value;
+    if (ep->fifolen[1] >= 64) {
+        /* We have a FIFO underrun */
+        TRACE("EP%d FIFO is now empty, stop reading", ep->epnum);
+        return 0x00000000;
+    }
+    /* In DMA mode clear RXPKTRDY and set REQPKT automatically
+     * (if AUTOREQ is set) */
+
+    ep->csr[1] &= ~MGC_M_RXCSR_FIFOFULL;
+    value=ep->buf[1][ep->fifostart[1] + ep->fifolen[1] ++];
+    TRACE("EP%d 0x%02x, %d", ep->epnum, value, ep->fifolen[1] );
+    return value;
+}
+
+static void musb_write_fifo(MUSBEndPoint *ep, uint8_t value)
+{
+    TRACE("EP%d = %02x", ep->epnum, value);
+    if (ep->fifolen[0] >= 64) {
+        /* We have a FIFO overrun */
+        TRACE("EP%d FIFO exceeded 64 bytes, stop feeding data", ep->epnum);
+        return;
+     }
+
+     ep->buf[0][ep->fifostart[0] + ep->fifolen[0] ++] = value;
+     ep->csr[0] |= MGC_M_TXCSR_FIFONOTEMPTY;
 }
 
 static void musb_ep_frame_cancel(MUSBEndPoint *ep, int dir)
@@ -895,7 +957,7 @@ static uint8_t musb_busctl_readb(void *opaque, int ep, int addr)
         return s->ep[ep].hport[1];
 
     default:
-        printf("%s: unknown register at %02x\n", __FUNCTION__, addr);
+        TRACE("unknown register 0x%02x", addr);
         return 0x00;
     };
 }
@@ -905,6 +967,12 @@ static void musb_busctl_writeb(void *opaque, int ep, int addr, uint8_t value)
     MUSBState *s = (MUSBState *) opaque;
 
     switch (addr) {
+    case MUSB_HDRC_TXFUNCADDR:
+        s->ep[ep].faddr[0] = value;
+        break;
+    case MUSB_HDRC_RXFUNCADDR:
+        s->ep[ep].faddr[1] = value;
+        break;
     case MUSB_HDRC_TXHUBADDR:
         s->ep[ep].haddr[0] = value;
         break;
@@ -919,7 +987,8 @@ static void musb_busctl_writeb(void *opaque, int ep, int addr, uint8_t value)
         break;
 
     default:
-        printf("%s: unknown register at %02x\n", __FUNCTION__, addr);
+        TRACE("unknown register 0x%02x", addr);
+        break;
     };
 }
 
@@ -975,9 +1044,11 @@ static uint8_t musb_ep_readb(void *opaque, int ep, int addr)
         return 0x00;
     case MUSB_HDRC_FIFOSIZE:
         return ep ? s->ep[ep].fifosize : s->ep[ep].config;
+    case MUSB_HDRC_RXCOUNT:
+        return s->ep[ep].rxcount;
 
     default:
-        printf("%s: unknown register at %02x\n", __FUNCTION__, addr);
+        TRACE("unknown register 0x%02x", addr);
         return 0x00;
     };
 }
@@ -1004,13 +1075,12 @@ static void musb_ep_writeb(void *opaque, int ep, int addr, uint8_t value)
     case (MUSB_HDRC_FIFOSIZE & ~1):
         break;
     case MUSB_HDRC_FIFOSIZE:
-        printf("%s: somebody messes with fifosize (now %i bytes)\n",
-                        __FUNCTION__, value);
+        TRACE("somebody messes with fifosize (now %i bytes)", value);
         s->ep[ep].fifosize = value;
         break;
-
     default:
-        printf("%s: unknown register at %02x\n", __FUNCTION__, addr);
+        TRACE("unknown register 0x%02x", addr);
+        break;
     };
 }
 
@@ -1194,8 +1264,12 @@ static uint32_t musb_readb(void *opaque, target_phys_addr_t addr)
         ep = (addr >> 4) & 0xf;
         return musb_ep_readb(s, ep, addr & 0xf);
 
+    case MUSB_HDRC_FIFO ... (MUSB_HDRC_FIFO + 0x3f):
+        ep = ((addr - MUSB_HDRC_FIFO) >> 2) & 0xf;
+        return musb_read_fifo(s->ep + ep);
+
     default:
-        printf("%s: unknown register at %02x\n", __FUNCTION__, (int) addr);
+        TRACE("unknown register 0x%02x", (int) addr);
         return 0x00;
     };
 }
@@ -1276,8 +1350,14 @@ static void musb_writeb(void *opaque, target_phys_addr_t addr, uint32_t value)
         musb_ep_writeb(s, ep, addr & 0xf, value);
         break;
 
+    case MUSB_HDRC_FIFO ... (MUSB_HDRC_FIFO + 0x3f):
+        ep = ((addr - MUSB_HDRC_FIFO) >> 2) & 0xf;
+        musb_write_fifo(s->ep + ep, value & 0xff);
+        break;
+
     default:
-        printf("%s: unknown register at %02x\n", __FUNCTION__, (int) addr);
+        TRACE("unknown register 0x%02x", (int) addr);
+        break;
     };
 }
 
@@ -1326,6 +1406,10 @@ static uint32_t musb_readh(void *opaque, target_phys_addr_t addr)
         ep = (addr >> 4) & 0xf;
         return musb_ep_readh(s, ep, addr & 0xf);
 
+    case MUSB_HDRC_FIFO ... (MUSB_HDRC_FIFO + 0x3f):
+        ep = ((addr - MUSB_HDRC_FIFO) >> 2) & 0xf;
+        return (musb_read_fifo(s->ep + ep) | musb_read_fifo(s->ep + ep) << 8);
+
     default:
         return musb_readb(s, addr) | (musb_readb(s, addr | 1) << 8);
     };
@@ -1353,12 +1437,12 @@ static void musb_writeh(void *opaque, target_phys_addr_t addr, uint32_t value)
     case MUSB_HDRC_TXFIFOADDR:
         s->ep[s->idx].fifoaddr[0] = value;
         s->ep[s->idx].buf[0] =
-                s->buf + ((value << 1) & (sizeof(s->buf) / 4 - 1));
+                s->buf + ((value << 3) & 0x7ff );
         break;
     case MUSB_HDRC_RXFIFOADDR:
         s->ep[s->idx].fifoaddr[1] = value;
         s->ep[s->idx].buf[1] =
-                s->buf + ((value << 1) & (sizeof(s->buf) / 4 - 1));
+                s->buf + ((value << 3) & 0x7ff);
         break;
 
     case MUSB_HDRC_EP_IDX ... (MUSB_HDRC_EP_IDX + 0xf):
@@ -1375,6 +1459,12 @@ static void musb_writeh(void *opaque, target_phys_addr_t addr, uint32_t value)
         musb_ep_writeh(s, ep, addr & 0xf, value);
         break;
 
+    case MUSB_HDRC_FIFO ... (MUSB_HDRC_FIFO + 0x3f):
+        ep = ((addr - MUSB_HDRC_FIFO) >> 2) & 0xf;
+        musb_write_fifo(s->ep + ep, value & 0xff);
+        musb_write_fifo(s->ep + ep, (value >> 8) & 0xff);
+        break;
+
     default:
         musb_writeb(s, addr, value & 0xff);
         musb_writeb(s, addr | 1, value >> 8);
@@ -1384,28 +1474,17 @@ static void musb_writeh(void *opaque, target_phys_addr_t addr, uint32_t value)
 static uint32_t musb_readw(void *opaque, target_phys_addr_t addr)
 {
     MUSBState *s = (MUSBState *) opaque;
-    MUSBEndPoint *ep;
-    int epnum;
+    int ep;
 
     switch (addr) {
     case MUSB_HDRC_FIFO ... (MUSB_HDRC_FIFO + 0x3f):
-        epnum = ((addr - MUSB_HDRC_FIFO) >> 2) & 0xf;
-        ep = s->ep + epnum;
-
-        if (ep->fifolen[1] >= 16) {
-            /* We have a FIFO underrun */
-            printf("%s: EP%i FIFO is now empty, stop reading\n",
-                            __FUNCTION__, epnum);
-            return 0x00000000;
-        }
-        /* In DMA mode clear RXPKTRDY and set REQPKT automatically
-         * (if AUTOREQ is set) */
-
-        ep->csr[1] &= ~MGC_M_RXCSR_FIFOFULL;
-        return ep->buf[1][ep->fifostart[1] + ep->fifolen[1] ++];
-
+        ep = ((addr - MUSB_HDRC_FIFO) >> 2) & 0xf;
+        return ( musb_read_fifo(s->ep + ep)       |
+                 musb_read_fifo(s->ep + ep) << 8  |
+                 musb_read_fifo(s->ep + ep) << 16 |
+                 musb_read_fifo(s->ep + ep) << 24 );
     default:
-        printf("%s: unknown register at %02x\n", __FUNCTION__, (int) addr);
+        TRACE("unknown register 0x%02x", (int) addr);
         return 0x00000000;
     };
 }
@@ -1413,28 +1492,19 @@ static uint32_t musb_readw(void *opaque, target_phys_addr_t addr)
 static void musb_writew(void *opaque, target_phys_addr_t addr, uint32_t value)
 {
     MUSBState *s = (MUSBState *) opaque;
-    MUSBEndPoint *ep;
-    int epnum;
+    int ep;
 
     switch (addr) {
     case MUSB_HDRC_FIFO ... (MUSB_HDRC_FIFO + 0x3f):
-        epnum = ((addr - MUSB_HDRC_FIFO) >> 2) & 0xf;
-        ep = s->ep + epnum;
-
-        if (ep->fifolen[0] >= 16) {
-            /* We have a FIFO overrun */
-            printf("%s: EP%i FIFO exceeded 64 bytes, stop feeding data\n",
-                            __FUNCTION__, epnum);
+        ep = ((addr - MUSB_HDRC_FIFO) >> 2) & 0xf;
+        musb_write_fifo(s->ep + ep, value & 0xff);
+        musb_write_fifo(s->ep + ep, (value >> 8 ) & 0xff);
+        musb_write_fifo(s->ep + ep, (value >> 16) & 0xff);
+        musb_write_fifo(s->ep + ep, (value >> 24) & 0xff);
             break;
-        }
-
-        ep->buf[0][ep->fifostart[0] + ep->fifolen[0] ++] = value;
-        if (epnum)
-            ep->csr[0] |= MGC_M_TXCSR_FIFONOTEMPTY;
-        break;
-
     default:
-        printf("%s: unknown register at %02x\n", __FUNCTION__, (int) addr);
+        TRACE("unknown register 0x%02x", (int) addr);
+        break;
     };
 }
 

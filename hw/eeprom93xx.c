@@ -75,7 +75,7 @@ struct _eeprom_t {
     uint8_t  tick;
     uint8_t  address;
     uint8_t  command;
-    uint8_t  writeable;
+    uint8_t  writable;
 
     uint8_t eecs;
     uint8_t eesk;
@@ -130,7 +130,7 @@ static const VMStateDescription vmstate_eeprom = {
         VMSTATE_UINT8(tick, eeprom_t),
         VMSTATE_UINT8(address, eeprom_t),
         VMSTATE_UINT8(command, eeprom_t),
-        VMSTATE_UINT8(writeable, eeprom_t),
+        VMSTATE_UINT8(writable, eeprom_t),
 
         VMSTATE_UINT8(eecs, eeprom_t),
         VMSTATE_UINT8(eesk, eeprom_t),
@@ -165,7 +165,7 @@ void eeprom93xx_write(eeprom_t *eeprom, int eecs, int eesk, int eedi)
         address = 0x0;
     } else if (eeprom->eecs && ! eecs) {
         /* End chip select cycle. This triggers write / erase. */
-        if (eeprom->writeable) {
+        if (eeprom->writable) {
             uint8_t subcommand = address >> (eeprom->addrbits - 2);
             if (command == 0 && subcommand == 2) {
                 /* Erase all. */
@@ -232,7 +232,7 @@ void eeprom93xx_write(eeprom_t *eeprom, int eecs, int eesk, int eedi)
                     switch (address >> (eeprom->addrbits - 2)) {
                         case 0:
                             logout("write disable command\n");
-                            eeprom->writeable = 0;
+                            eeprom->writable = 0;
                             break;
                         case 1:
                             logout("write all command\n");
@@ -242,7 +242,7 @@ void eeprom93xx_write(eeprom_t *eeprom, int eecs, int eesk, int eedi)
                             break;
                         case 3:
                             logout("write enable command\n");
-                            eeprom->writeable = 1;
+                            eeprom->writable = 1;
                             break;
                     }
                 } else {
@@ -289,7 +289,7 @@ void eeprom93xx_reset(eeprom_t *eeprom)
 }
 #endif
 
-eeprom_t *eeprom93xx_new(uint16_t nwords)
+eeprom_t *eeprom93xx_new(DeviceState *dev, uint16_t nwords)
 {
     /* Add a new EEPROM (with 16, 64 or 256 words). */
     eeprom_t *eeprom;
@@ -316,15 +316,15 @@ eeprom_t *eeprom93xx_new(uint16_t nwords)
     /* Output DO is tristate, read results in 1. */
     eeprom->eedo = 1;
     logout("eeprom = 0x%p, nwords = %u\n", eeprom, nwords);
-    vmstate_register(0, &vmstate_eeprom, eeprom);
+    vmstate_register(dev, 0, &vmstate_eeprom, eeprom);
     return eeprom;
 }
 
-void eeprom93xx_free(eeprom_t *eeprom)
+void eeprom93xx_free(DeviceState *dev, eeprom_t *eeprom)
 {
     /* Destroy EEPROM. */
     logout("eeprom = 0x%p\n", eeprom);
-    vmstate_unregister(&vmstate_eeprom, eeprom);
+    vmstate_unregister(dev, &vmstate_eeprom, eeprom);
     qemu_free(eeprom);
 }
 

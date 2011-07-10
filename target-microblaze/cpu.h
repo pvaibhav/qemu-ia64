@@ -24,6 +24,7 @@
 #define CPUState struct CPUMBState
 
 #include "cpu-defs.h"
+#include "softfloat.h"
 struct CPUMBState;
 #if !defined(CONFIG_USER_ONLY)
 #include "mmu.h"
@@ -31,7 +32,7 @@ struct CPUMBState;
 
 #define TARGET_HAS_ICE 1
 
-#define ELF_MACHINE	EM_XILINX_MICROBLAZE
+#define ELF_MACHINE	EM_MICROBLAZE
 
 #define EXCP_NMI        1
 #define EXCP_MMU        2
@@ -39,6 +40,9 @@ struct CPUMBState;
 #define EXCP_BREAK      4
 #define EXCP_HW_BREAK   5
 #define EXCP_HW_EXCP    6
+
+/* MicroBlaze-specific interrupt pending bits.  */
+#define CPU_INTERRUPT_NMI       CPU_INTERRUPT_TGT_EXT_3
 
 /* Register aliases. R0 - R15 */
 #define R_SP     1
@@ -78,6 +82,8 @@ struct CPUMBState;
 #define          ESR_DIZ       (1<<11) /* Zone Protection */
 #define          ESR_S         (1<<10) /* Store instruction */
 
+#define          ESR_ESS_FSL_OFFSET     5
+
 #define          ESR_EC_FSL             0
 #define          ESR_EC_UNALIGNED_DATA  1
 #define          ESR_EC_ILLEGAL_OP      2
@@ -90,6 +96,14 @@ struct CPUMBState;
 #define          ESR_EC_INSN_STORAGE    9
 #define          ESR_EC_DATA_TLB        10
 #define          ESR_EC_INSN_TLB        11
+#define          ESR_EC_MASK            31
+
+/* Floating Point Status Register (FSR) Bits */
+#define FSR_IO          (1<<4) /* Invalid operation */
+#define FSR_DZ          (1<<3) /* Divide-by-zero */
+#define FSR_OF          (1<<2) /* Overflow */
+#define FSR_UF          (1<<1) /* Underflow */
+#define FSR_DO          (1<<0) /* Denormalized operand error */
 
 /* Version reg.  */
 /* Basic PVR mask */
@@ -102,6 +116,9 @@ struct CPUMBState;
 #define PVR0_USE_ICACHE_MASK            0x02000000
 #define PVR0_USE_DCACHE_MASK            0x01000000
 #define PVR0_USE_MMU                    0x00800000      /* new */
+#define PVR0_USE_BTC			0x00400000
+#define PVR0_ENDI			0x00200000
+#define PVR0_FAULT			0x00100000
 #define PVR0_VERSION_MASK               0x0000FF00
 #define PVR0_USER1_MASK                 0x000000FF
 
@@ -161,6 +178,7 @@ struct CPUMBState;
 #define PVR5_DCACHE_ALLOW_WR_MASK       0x01000000
 #define PVR5_DCACHE_LINE_LEN_MASK       0x00E00000
 #define PVR5_DCACHE_BYTE_SIZE_MASK      0x001F0000
+#define PVR5_DCACHE_WRITEBACK_MASK      0x00004000
 
 /* ICache base address PVR mask */
 #define PVR6_ICACHE_BASEADDR_MASK       0xFFFFFFFF
@@ -182,7 +200,7 @@ struct CPUMBState;
 #define PVR11_MMU_ITLB_SIZE             0x38000000
 #define PVR11_MMU_DTLB_SIZE             0x07000000
 #define PVR11_MMU_TLB_ACCESS            0x00C00000
-#define PVR11_MMU_ZONES                 0x003C0000
+#define PVR11_MMU_ZONES                 0x003E0000
 /* MSR Reset value PVR mask */
 #define PVR11_MSR_RESET_VALUE_MASK      0x000007FF
 
@@ -199,6 +217,13 @@ struct CPUMBState;
 #define CC_EQ  0
 
 #define NB_MMU_MODES    3
+
+#define STREAM_EXCEPTION (1 << 0)
+#define STREAM_ATOMIC    (1 << 1)
+#define STREAM_TEST      (1 << 2)
+#define STREAM_CONTROL   (1 << 3)
+#define STREAM_NONBLOCK  (1 << 4)
+
 typedef struct CPUMBState {
     uint32_t debug;
     uint32_t btaken;
@@ -208,6 +233,7 @@ typedef struct CPUMBState {
     uint32_t imm;
     uint32_t regs[33];
     uint32_t sregs[24];
+    float_status fp_status;
 
     /* Internal flags.  */
 #define IMM_FLAG	4
@@ -217,8 +243,7 @@ typedef struct CPUMBState {
 #define DRTB_FLAG	(1 << 18)
 #define D_FLAG		(1 << 19)  /* Bit in ESR.  */
 /* TB dependant CPUState.  */
-#define IFLAGS_TB_MASK  (D_FLAG | IMM_FLAG | DRTI_FLAG \
-                         | DRTE_FLAG | DRTB_FLAG | MSR_EE_FLAG)
+#define IFLAGS_TB_MASK  (D_FLAG | IMM_FLAG | DRTI_FLAG | DRTE_FLAG | DRTB_FLAG)
     uint32_t iflags;
 
     struct {
@@ -252,6 +277,9 @@ enum {
 /* FIXME: MB uses variable pages down to 1K but linux only uses 4k.  */
 #define TARGET_PAGE_BITS 12
 #define MMAP_SHIFT TARGET_PAGE_BITS
+
+#define TARGET_PHYS_ADDR_SPACE_BITS 32
+#define TARGET_VIRT_ADDR_SPACE_BITS 32
 
 #define cpu_init cpu_mb_init
 #define cpu_exec cpu_mb_exec
@@ -303,12 +331,6 @@ static inline int cpu_interrupts_enabled(CPUState *env)
 }
 
 #include "cpu-all.h"
-#include "exec-all.h"
-
-static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
-{
-    env->sregs[SR_PC] = tb->pc;
-}
 
 static inline target_ulong cpu_get_pc(CPUState *env)
 {
@@ -320,10 +342,25 @@ static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
 {
     *pc = env->sregs[SR_PC];
     *cs_base = 0;
-    env->iflags |= env->sregs[SR_MSR] & MSR_EE;
-    *flags = env->iflags & IFLAGS_TB_MASK;
+    *flags = (env->iflags & IFLAGS_TB_MASK) |
+                 (env->sregs[SR_MSR] & (MSR_UM | MSR_VM | MSR_EE));
 }
 
+#if !defined(CONFIG_USER_ONLY)
 void do_unassigned_access(target_phys_addr_t addr, int is_write, int is_exec,
                           int is_asi, int size);
+#endif
+
+static inline bool cpu_has_work(CPUState *env)
+{
+    return env->interrupt_request & (CPU_INTERRUPT_HARD | CPU_INTERRUPT_NMI);
+}
+
+#include "exec-all.h"
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->sregs[SR_PC] = tb->pc;
+}
+
 #endif

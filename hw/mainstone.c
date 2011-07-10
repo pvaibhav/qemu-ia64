@@ -14,9 +14,31 @@
 #include "net.h"
 #include "devices.h"
 #include "boards.h"
-#include "mainstone.h"
-#include "sysemu.h"
 #include "flash.h"
+#include "blockdev.h"
+#include "sysbus.h"
+
+/* Device addresses */
+#define MST_FPGA_PHYS	0x08000000
+#define MST_ETH_PHYS	0x10000300
+#define MST_FLASH_0		0x00000000
+#define MST_FLASH_1		0x04000000
+
+/* IRQ definitions */
+#define MMC_IRQ       0
+#define USIM_IRQ      1
+#define USBC_IRQ      2
+#define ETHERNET_IRQ  3
+#define AC97_IRQ      4
+#define PEN_IRQ       5
+#define MSINS_IRQ     6
+#define EXBRD_IRQ     7
+#define S0_CD_IRQ     9
+#define S0_STSCHG_IRQ 10
+#define S0_IRQ        11
+#define S1_CD_IRQ     13
+#define S1_STSCHG_IRQ 14
+#define S1_IRQ        15
 
 static struct keymap map[0xE0] = {
     [0 ... 0xDF] = { -1, -1 },
@@ -76,9 +98,10 @@ static void mainstone_common_init(ram_addr_t ram_size,
     uint32_t sector_len = 256 * 1024;
     target_phys_addr_t mainstone_flash_base[] = { MST_FLASH_0, MST_FLASH_1 };
     PXA2xxState *cpu;
-    qemu_irq *mst_irq;
+    DeviceState *mst_irq;
     DriveInfo *dinfo;
     int i;
+    int be;
 
     if (!cpu_model)
         cpu_model = "pxa270-c5";
@@ -86,11 +109,14 @@ static void mainstone_common_init(ram_addr_t ram_size,
     /* Setup CPU & memory */
     cpu = pxa270_init(mainstone_binfo.ram_size, cpu_model);
     cpu_register_physical_memory(0, MAINSTONE_ROM,
-                    qemu_ram_alloc(MAINSTONE_ROM) | IO_MEM_ROM);
+                    qemu_ram_alloc(NULL, "mainstone.rom",
+                                   MAINSTONE_ROM) | IO_MEM_ROM);
 
-    /* Setup initial (reset) machine state */
-    cpu->env->regs[15] = mainstone_binfo.loader_start;
-
+#ifdef TARGET_WORDS_BIGENDIAN
+    be = 1;
+#else
+    be = 0;
+#endif
     /* There are two 32MiB flash devices on the board */
     for (i = 0; i < 2; i ++) {
         dinfo = drive_get(IF_PFLASH, 0, i);
@@ -101,24 +127,36 @@ static void mainstone_common_init(ram_addr_t ram_size,
         }
 
         if (!pflash_cfi01_register(mainstone_flash_base[i],
-                                qemu_ram_alloc(MAINSTONE_FLASH),
-                                dinfo->bdrv, sector_len,
-                                MAINSTONE_FLASH / sector_len, 4, 0, 0, 0, 0)) {
+                                   qemu_ram_alloc(NULL, i ? "mainstone.flash1" :
+                                                  "mainstone.flash0",
+                                                  MAINSTONE_FLASH),
+                                   dinfo->bdrv, sector_len,
+                                   MAINSTONE_FLASH / sector_len, 4, 0, 0, 0, 0,
+                                   be)) {
             fprintf(stderr, "qemu: Error registering flash memory.\n");
             exit(1);
         }
     }
 
-    mst_irq = mst_irq_init(cpu, MST_FPGA_PHYS, PXA2XX_PIC_GPIO_0);
+    mst_irq = sysbus_create_simple("mainstone-fpga", MST_FPGA_PHYS,
+                    qdev_get_gpio_in(cpu->gpio, 0));
 
     /* setup keypad */
     printf("map addr %p\n", &map);
     pxa27x_register_keypad(cpu->kp, map, 0xe0);
 
     /* MMC/SD host */
-    pxa2xx_mmci_handlers(cpu->mmc, NULL, mst_irq[MMC_IRQ]);
+    pxa2xx_mmci_handlers(cpu->mmc, NULL, qdev_get_gpio_in(mst_irq, MMC_IRQ));
 
-    smc91c111_init(&nd_table[0], MST_ETH_PHYS, mst_irq[ETHERNET_IRQ]);
+    pxa2xx_pcmcia_set_irq_cb(cpu->pcmcia[0],
+            qdev_get_gpio_in(mst_irq, S0_IRQ),
+            qdev_get_gpio_in(mst_irq, S0_CD_IRQ));
+    pxa2xx_pcmcia_set_irq_cb(cpu->pcmcia[1],
+            qdev_get_gpio_in(mst_irq, S1_IRQ),
+            qdev_get_gpio_in(mst_irq, S1_CD_IRQ));
+
+    smc91c111_init(&nd_table[0], MST_ETH_PHYS,
+                    qdev_get_gpio_in(mst_irq, ETHERNET_IRQ));
 
     mainstone_binfo.kernel_filename = kernel_filename;
     mainstone_binfo.kernel_cmdline = kernel_cmdline;

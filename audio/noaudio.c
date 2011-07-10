@@ -46,7 +46,7 @@ static int no_run_out (HWVoiceOut *hw, int live)
     int64_t ticks;
     int64_t bytes;
 
-    now = qemu_get_clock (vm_clock);
+    now = qemu_get_clock_ns (vm_clock);
     ticks = now - no->old_ticks;
     bytes = muldiv64 (ticks, hw->info.bytes_per_second, get_ticks_per_sec ());
     bytes = audio_MIN (bytes, INT_MAX);
@@ -102,7 +102,7 @@ static int no_run_in (HWVoiceIn *hw)
     int samples = 0;
 
     if (dead) {
-        int64_t now = qemu_get_clock (vm_clock);
+        int64_t now = qemu_get_clock_ns (vm_clock);
         int64_t ticks = now - no->old_ticks;
         int64_t bytes =
             muldiv64 (ticks, hw->info.bytes_per_second, get_ticks_per_sec ());
@@ -117,11 +117,14 @@ static int no_run_in (HWVoiceIn *hw)
 
 static int no_read (SWVoiceIn *sw, void *buf, int size)
 {
+    /* use custom code here instead of audio_pcm_sw_read() to avoid
+     * useless resampling/mixing */
     int samples = size >> sw->info.shift;
     int total = sw->hw->total_samples_captured - sw->total_hw_samples_acquired;
     int to_clear = audio_MIN (samples, total);
+    sw->total_hw_samples_acquired += total;
     audio_pcm_info_clear_buf (&sw->info, buf, to_clear);
-    return to_clear;
+    return to_clear << sw->info.shift;
 }
 
 static int no_ctl_in (HWVoiceIn *hw, int cmd, ...)

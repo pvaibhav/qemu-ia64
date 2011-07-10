@@ -4,18 +4,17 @@
  * Copyright (c) 2006-2007 CodeSourcery.
  * Written by Paul Brook
  *
- * This code is licenced under the GPL.
+ * This code is licensed under the GPL.
  */
 
 #include "sysbus.h"
 #include "arm-misc.h"
-#include "sysemu.h"
 #include "loader.h"
 #include "elf.h"
 
 /* Bitbanded IO.  Each word corresponds to a single bit.  */
 
-/* Get the byte address of the real memory for a bitband acess.  */
+/* Get the byte address of the real memory for a bitband access.  */
 static inline uint32_t bitband_addr(void * opaque, uint32_t addr)
 {
     uint32_t res;
@@ -130,7 +129,7 @@ static int bitband_init(SysBusDevice *dev)
     int iomemtype;
 
     iomemtype = cpu_register_io_memory(bitband_readfn, bitband_writefn,
-                                       &s->base);
+                                       &s->base, DEVICE_NATIVE_ENDIAN);
     sysbus_init_mmio(dev, 0x02000000, iomemtype);
     return 0;
 }
@@ -151,6 +150,12 @@ static void armv7m_bitband_init(void)
 }
 
 /* Board init.  */
+
+static void armv7m_reset(void *opaque)
+{
+    cpu_reset((CPUState *)opaque);
+}
+
 /* Init CPU and memory for a v7-M based board.
    flash_size and sram_size are in kb.
    Returns the NVIC array.  */
@@ -163,7 +168,6 @@ qemu_irq *armv7m_init(int flash_size, int sram_size,
     /* FIXME: make this local state.  */
     static qemu_irq pic[64];
     qemu_irq *cpu_pic;
-    uint32_t pc;
     int image_size;
     uint64_t entry;
     uint64_t lowaddr;
@@ -195,13 +199,15 @@ qemu_irq *armv7m_init(int flash_size, int sram_size,
 
     /* Flash programming is done via the SCU, so pretend it is ROM.  */
     cpu_register_physical_memory(0, flash_size,
-                                 qemu_ram_alloc(flash_size) | IO_MEM_ROM);
+                                 qemu_ram_alloc(NULL, "armv7m.flash",
+                                                flash_size) | IO_MEM_ROM);
     cpu_register_physical_memory(0x20000000, sram_size,
-                                 qemu_ram_alloc(sram_size) | IO_MEM_RAM);
+                                 qemu_ram_alloc(NULL, "armv7m.sram",
+                                                sram_size) | IO_MEM_RAM);
     armv7m_bitband_init();
 
     nvic = qdev_create(NULL, "armv7m_nvic");
-    env->v7m.nvic = nvic;
+    env->nvic = nvic;
     qdev_init_nofail(nvic);
     cpu_pic = arm_pic_init_cpu(env);
     sysbus_connect_irq(sysbus_from_qdev(nvic), 0, cpu_pic[ARM_PIC_CPU_IRQ]);
@@ -215,8 +221,8 @@ qemu_irq *armv7m_init(int flash_size, int sram_size,
     big_endian = 0;
 #endif
 
-    image_size = load_elf(kernel_filename, 0, &entry, &lowaddr, NULL,
-                          big_endian, ELF_MACHINE, 1);
+    image_size = load_elf(kernel_filename, NULL, NULL, &entry, &lowaddr,
+                          NULL, big_endian, ELF_MACHINE, 1);
     if (image_size < 0) {
         image_size = load_image_targphys(kernel_filename, 0, flash_size);
 	lowaddr = 0;
@@ -227,24 +233,14 @@ qemu_irq *armv7m_init(int flash_size, int sram_size,
         exit(1);
     }
 
-    /* If the image was loaded at address zero then assume it is a
-       regular ROM image and perform the normal CPU reset sequence.
-       Otherwise jump directly to the entry point.  */
-    if (lowaddr == 0) {
-	env->regs[13] = ldl_phys(0);
-	pc = ldl_phys(4);
-    } else {
-	pc = entry;
-    }
-    env->thumb = pc & 1;
-    env->regs[15] = pc & ~1;
-
     /* Hack to map an additional page of ram at the top of the address
        space.  This stops qemu complaining about executing code outside RAM
        when returning from an exception.  */
     cpu_register_physical_memory(0xfffff000, 0x1000,
-                                 qemu_ram_alloc(0x1000) | IO_MEM_RAM);
+                                 qemu_ram_alloc(NULL, "armv7m.hack", 
+                                                0x1000) | IO_MEM_RAM);
 
+    qemu_register_reset(armv7m_reset, env);
     return pic;
 }
 

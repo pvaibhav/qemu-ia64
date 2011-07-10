@@ -8,7 +8,6 @@
  * This code is licensed under the GNU GPL v2.
  */
 #include "hw.h"
-#include "pxa.h"
 #include "devices.h"
 #include "flash.h"
 #include "console.h"
@@ -381,7 +380,7 @@ static void tc6393xb_nand_writeb(TC6393xbState *s, target_phys_addr_t addr, uint
         case NAND_DATA + 2:
         case NAND_DATA + 3:
             nand_setio(s->flash, value);
-            s->nand.isr &= 1;
+            s->nand.isr |= 1;
             tc6393xb_nand_irq(s);
             return;
         case NAND_MODE:
@@ -590,10 +589,10 @@ TC6393xbState *tc6393xb_init(uint32_t base, qemu_irq irq)
     s->flash = nand_init(NAND_MFR_TOSHIBA, 0x76);
 
     iomemtype = cpu_register_io_memory(tc6393xb_readfn,
-                    tc6393xb_writefn, s);
+                    tc6393xb_writefn, s, DEVICE_NATIVE_ENDIAN);
     cpu_register_physical_memory(base, 0x10000, iomemtype);
 
-    s->vram_addr = qemu_ram_alloc(0x100000);
+    s->vram_addr = qemu_ram_alloc(NULL, "tc6393xb.vram", 0x100000);
     s->vram_ptr = qemu_get_ram_ptr(s->vram_addr);
     cpu_register_physical_memory(base + 0x100000, 0x100000, s->vram_addr);
     s->scr_width = 480;

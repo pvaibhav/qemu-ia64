@@ -323,7 +323,7 @@ static void bt_hid_control_transaction(struct bt_hid_device_s *s,
             break;
         }
         s->proto = parameter;
-        s->usbdev->info->handle_control(s->usbdev, SET_PROTOCOL, s->proto, 0, 0,
+        s->usbdev->info->handle_control(s->usbdev, NULL, SET_PROTOCOL, s->proto, 0, 0,
                                         NULL);
         ret = BT_HS_SUCCESSFUL;
         break;
@@ -333,7 +333,7 @@ static void bt_hid_control_transaction(struct bt_hid_device_s *s,
             ret = BT_HS_ERR_INVALID_PARAMETER;
             break;
         }
-        s->usbdev->info->handle_control(s->usbdev, GET_IDLE, 0, 0, 1,
+        s->usbdev->info->handle_control(s->usbdev, NULL, GET_IDLE, 0, 0, 1,
                         s->control->sdu_out(s->control, 1));
         s->control->sdu_submit(s->control);
         break;
@@ -346,7 +346,7 @@ static void bt_hid_control_transaction(struct bt_hid_device_s *s,
 
         /* We don't need to know about the Idle Rate here really,
          * so just pass it on to the device.  */
-        ret = s->usbdev->info->handle_control(s->usbdev,
+        ret = s->usbdev->info->handle_control(s->usbdev, NULL,
                         SET_IDLE, data[1], 0, 0, NULL) ?
                 BT_HS_SUCCESSFUL : BT_HS_ERR_INVALID_PARAMETER;
         /* XXX: Does this generate a handshake? */
@@ -552,7 +552,7 @@ static struct bt_device_s *bt_hid_init(struct bt_scatternet_s *net,
                     BT_HID_MTU, bt_hid_new_interrupt_ch);
 
     s->usbdev = dev;
-    s->btdev.device.lmp_name = s->usbdev->devname;
+    s->btdev.device.lmp_name = s->usbdev->product_desc;
     usb_hid_datain_cb(s->usbdev, s, bt_hid_datain);
 
     s->btdev.device.handle_destroy = bt_hid_destroy;
@@ -566,6 +566,6 @@ static struct bt_device_s *bt_hid_init(struct bt_scatternet_s *net,
 
 struct bt_device_s *bt_keyboard_init(struct bt_scatternet_s *net)
 {
-    USBDevice *dev = usb_create_simple(NULL /* FIXME */, "QEMU USB Keyboard");
+    USBDevice *dev = usb_create_simple(NULL /* FIXME */, "usb-kbd");
     return bt_hid_init(net, dev, class_keyboard);
 }

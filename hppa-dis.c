@@ -576,7 +576,7 @@ struct pa_opcode
     const char *name;
     unsigned long int match;	/* Bits that must be set...  */
     unsigned long int mask;	/* ... in these bits. */
-    char *args;
+    const char *args;
     enum pa_arch arch;
     char flags;
 };
@@ -1645,7 +1645,7 @@ static const char *const fp_reg_names[] =
 
 typedef unsigned int CORE_ADDR;
 
-/* Get at various relevent fields of an instruction word.  */
+/* Get at various relevant fields of an instruction word.  */
 
 #define MASK_5  0x1f
 #define MASK_10 0x3ff
@@ -1771,13 +1771,13 @@ static const char *const add_compl_names[] = { 0, "", ",l", ",tsv" };
 static void
 fput_reg (unsigned reg, disassemble_info *info)
 {
-  (*info->fprintf_func) (info->stream, reg ? reg_names[reg] : "r0");
+  (*info->fprintf_func) (info->stream, "%s", reg ? reg_names[reg] : "r0");
 }
 
 static void
 fput_fp_reg (unsigned reg, disassemble_info *info)
 {
-  (*info->fprintf_func) (info->stream, reg ? fp_reg_names[reg] : "fr0");
+  (*info->fprintf_func) (info->stream, "%s", reg ? fp_reg_names[reg] : "fr0");
 }
 
 static void
@@ -1794,7 +1794,7 @@ fput_fp_reg_r (unsigned reg, disassemble_info *info)
 static void
 fput_creg (unsigned reg, disassemble_info *info)
 {
-  (*info->fprintf_func) (info->stream, control_reg[reg]);
+  (*info->fprintf_func) (info->stream, "%s", control_reg[reg]);
 }
 
 /* Print constants with sign.  */
@@ -2753,7 +2753,7 @@ print_insn_hppa (bfd_vma memaddr, disassemble_info *info)
 		    int sf = GET_FIELD (insn, 19, 20);
 		    const char * const * source = float_format_names;
 		    const char * const * dest = float_format_names;
-		    char *t = "";
+		    const char *t = "";
 
 		    if (sub == 4)
 		      {

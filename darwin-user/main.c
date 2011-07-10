@@ -82,9 +82,9 @@ static inline uint64_t cpu_ppc_get_tb (CPUState *env)
     return 0;
 }
 
-uint32_t cpu_ppc_load_tbl (CPUState *env)
+uint64_t cpu_ppc_load_tbl (CPUState *env)
 {
-    return cpu_ppc_get_tb(env) & 0xFFFFFFFF;
+    return cpu_ppc_get_tb(env);
 }
 
 uint32_t cpu_ppc_load_tbu (CPUState *env)
@@ -92,9 +92,9 @@ uint32_t cpu_ppc_load_tbu (CPUState *env)
     return cpu_ppc_get_tb(env) >> 32;
 }
 
-uint32_t cpu_ppc_load_atbl (CPUState *env)
+uint64_t cpu_ppc_load_atbl (CPUState *env)
 {
-    return cpu_ppc_get_tb(env) & 0xFFFFFFFF;
+    return cpu_ppc_get_tb(env);
 }
 
 uint32_t cpu_ppc_load_atbu (CPUState *env)
@@ -113,12 +113,12 @@ uint32_t cpu_ppc601_load_rtcl (CPUState *env)
 }
 
 /* XXX: to be fixed */
-int ppc_dcr_read (ppc_dcr_t *dcr_env, int dcrn, target_ulong *valp)
+int ppc_dcr_read (ppc_dcr_t *dcr_env, int dcrn, uint32_t *valp)
 {
     return -1;
 }
 
-int ppc_dcr_write (ppc_dcr_t *dcr_env, int dcrn, target_ulong val)
+int ppc_dcr_write (ppc_dcr_t *dcr_env, int dcrn, uint32_t val)
 {
     return -1;
 }
@@ -704,7 +704,7 @@ void cpu_loop(CPUX86State *env)
 }
 #endif
 
-void usage(void)
+static void usage(void)
 {
     printf("qemu-" TARGET_ARCH " version " QEMU_VERSION ", Copyright (c) 2003-2004 Fabrice Bellard\n"
            "usage: qemu-" TARGET_ARCH " [-h] [-d opts] [-L path] [-s size] program [arguments...]\n"
@@ -738,6 +738,8 @@ TaskState *first_task_state;
 int main(int argc, char **argv)
 {
     const char *filename;
+    const char *log_file = DEBUG_LOGFILE;
+    const char *log_mask = NULL;
     struct target_pt_regs regs1, *regs = &regs1;
     TaskState ts1, *ts = &ts1;
     CPUState *env;
@@ -748,9 +750,6 @@ int main(int argc, char **argv)
 
     if (argc <= 1)
         usage();
-
-    /* init debug */
-    cpu_set_log_filename(DEBUG_LOGFILE);
 
     optind = 1;
     for(;;) {
@@ -764,22 +763,15 @@ int main(int argc, char **argv)
         if (!strcmp(r, "-")) {
             break;
         } else if (!strcmp(r, "d")) {
-            int mask;
-            CPULogItem *item;
-
-        if (optind >= argc)
-        break;
-
-        r = argv[optind++];
-            mask = cpu_str_to_log_mask(r);
-            if (!mask) {
-                printf("Log items (comma separated):\n");
-                for(item = cpu_log_items; item->mask != 0; item++) {
-                    printf("%-10s %s\n", item->name, item->help);
-                }
-                exit(1);
+            if (optind >= argc) {
+                break;
             }
-            cpu_set_log(mask);
+            log_mask = argv[optind++];
+        } else if (!strcmp(r, "D")) {
+            if (optind >= argc) {
+                break;
+            }
+            log_file = argv[optind++];
         } else if (!strcmp(r, "s")) {
             r = argv[optind++];
             stack_size = strtol(r, (char **)&r, 0);
@@ -820,6 +812,23 @@ int main(int argc, char **argv)
     if (optind >= argc)
         usage();
     filename = argv[optind];
+
+    /* init debug */
+    cpu_set_log_filename(log_file);
+    if (log_mask) {
+        int mask;
+        CPULogItem *item;
+
+        mask = cpu_str_to_log_mask(log_mask);
+        if (!mask) {
+            printf("Log items (comma separated):\n");
+            for (item = cpu_log_items; item->mask != 0; item++) {
+                printf("%-10s %s\n", item->name, item->help);
+            }
+            exit(1);
+        }
+        cpu_set_log(mask);
+    }
 
     /* Zero out regs */
     memset(regs, 0, sizeof(struct target_pt_regs));

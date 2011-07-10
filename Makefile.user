@@ -2,23 +2,19 @@
 
 include ../config-host.mak
 include $(SRC_PATH)/rules.mak
+-include config.mak
 
 .PHONY: all
 
-VPATH=$(SRC_PATH)
+$(call set-vpath, $(SRC_PATH))
 
 QEMU_CFLAGS+=-I..
 
-obj-y =
-obj-y += envlist.o path.o
-obj-y += tcg-runtime.o host-utils.o
-obj-y += cutils.o cache-utils.o
+include $(SRC_PATH)/Makefile.objs
 
-all: libuser.a
+all: $(user-obj-y)
 # Dummy command so that make thinks it has done something
 	@true
-
-libuser.a: $(obj-y)
 
 clean:
 	rm -f *.o *.d *.a *~

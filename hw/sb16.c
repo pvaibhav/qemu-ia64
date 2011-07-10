@@ -766,7 +766,7 @@ static void complete (SB16State *s)
                     if (s->aux_ts) {
                         qemu_mod_timer (
                             s->aux_ts,
-                            qemu_get_clock (vm_clock) + ticks
+                            qemu_get_clock_ns (vm_clock) + ticks
                             );
                     }
                 }
@@ -782,8 +782,10 @@ static void complete (SB16State *s)
             break;
 
         case 0xe2:
+#ifdef DEBUG
             d0 = dsp_get_data (s);
-            ldebug ("E2 = %#x\n", d0);
+            dolog ("E2 = %#x\n", d0);
+#endif
             break;
 
         case 0xe4:
@@ -1359,23 +1361,27 @@ static int sb16_initfn (ISADevice *dev)
     s->csp_regs[9] = 0xf8;
 
     reset_mixer (s);
-    s->aux_ts = qemu_new_timer (vm_clock, aux_timer, s);
+    s->aux_ts = qemu_new_timer_ns (vm_clock, aux_timer, s);
     if (!s->aux_ts) {
         dolog ("warning: Could not create auxiliary timer\n");
     }
 
     for (i = 0; i < ARRAY_SIZE (dsp_write_ports); i++) {
         register_ioport_write (s->port + dsp_write_ports[i], 1, 1, dsp_write, s);
+        isa_init_ioport(dev, s->port + dsp_write_ports[i]);
     }
 
     for (i = 0; i < ARRAY_SIZE (dsp_read_ports); i++) {
         register_ioport_read (s->port + dsp_read_ports[i], 1, 1, dsp_read, s);
+        isa_init_ioport(dev, s->port + dsp_read_ports[i]);
     }
 
     register_ioport_write (s->port + 0x4, 1, 1, mixer_write_indexb, s);
     register_ioport_write (s->port + 0x4, 1, 2, mixer_write_indexw, s);
+    isa_init_ioport(dev, s->port + 0x4);
     register_ioport_read (s->port + 0x5, 1, 1, mixer_read, s);
     register_ioport_write (s->port + 0x5, 1, 1, mixer_write_datab, s);
+    isa_init_ioport(dev, s->port + 0x5);
 
     DMA_register_channel (s->hdma, SB_read_DMA, s);
     DMA_register_channel (s->dma, SB_read_DMA, s);

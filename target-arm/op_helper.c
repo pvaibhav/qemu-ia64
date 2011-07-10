@@ -17,7 +17,7 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 #include "exec.h"
-#include "helpers.h"
+#include "helper.h"
 
 #define SIGNBIT (uint32_t)0x80000000
 #define SIGNBIT64 ((uint64_t)1 << 63)
@@ -25,21 +25,7 @@
 void raise_exception(int tt)
 {
     env->exception_index = tt;
-    cpu_loop_exit();
-}
-
-/* thread support */
-
-static spinlock_t global_cpu_lock = SPIN_LOCK_UNLOCKED;
-
-void cpu_lock(void)
-{
-    spin_lock(&global_cpu_lock);
-}
-
-void cpu_unlock(void)
-{
-    spin_unlock(&global_cpu_lock);
+    cpu_loop_exit(env);
 }
 
 uint32_t HELPER(neon_tbl)(uint32_t ireg, uint32_t def,
@@ -104,7 +90,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
             if (tb) {
                 /* the PC is inside the translated code. It means that we have
                    a virtual CPU fault */
-                cpu_restore_state(tb, env, pc, NULL);
+                cpu_restore_state(tb, env, pc);
             }
         }
         raise_exception(env->exception_index);
@@ -248,13 +234,13 @@ void HELPER(wfi)(void)
 {
     env->exception_index = EXCP_HLT;
     env->halted = 1;
-    cpu_loop_exit();
+    cpu_loop_exit(env);
 }
 
 void HELPER(exception)(uint32_t excp)
 {
     env->exception_index = excp;
-    cpu_loop_exit();
+    cpu_loop_exit(env);
 }
 
 uint32_t HELPER(cpsr_read)(void)
@@ -437,53 +423,4 @@ uint32_t HELPER(ror_cc)(uint32_t x, uint32_t i)
         env->CF = (x >> (shift - 1)) & 1;
         return ((uint32_t)x >> shift) | (x << (32 - shift));
     }
-}
-
-uint64_t HELPER(neon_add_saturate_s64)(uint64_t src1, uint64_t src2)
-{
-    uint64_t res;
-
-    res = src1 + src2;
-    if (((res ^ src1) & SIGNBIT64) && !((src1 ^ src2) & SIGNBIT64)) {
-        env->QF = 1;
-        res = ((int64_t)src1 >> 63) ^ ~SIGNBIT64;
-    }
-    return res;
-}
-
-uint64_t HELPER(neon_add_saturate_u64)(uint64_t src1, uint64_t src2)
-{
-    uint64_t res;
-
-    res = src1 + src2;
-    if (res < src1) {
-        env->QF = 1;
-        res = ~(uint64_t)0;
-    }
-    return res;
-}
-
-uint64_t HELPER(neon_sub_saturate_s64)(uint64_t src1, uint64_t src2)
-{
-    uint64_t res;
-
-    res = src1 - src2;
-    if (((res ^ src1) & SIGNBIT64) && ((src1 ^ src2) & SIGNBIT64)) {
-        env->QF = 1;
-        res = ((int64_t)src1 >> 63) ^ ~SIGNBIT64;
-    }
-    return res;
-}
-
-uint64_t HELPER(neon_sub_saturate_u64)(uint64_t src1, uint64_t src2)
-{
-    uint64_t res;
-
-    if (src1 < src2) {
-        env->QF = 1;
-        res = 0;
-    } else {
-        res = src1 - src2;
-    }
-    return res;
 }

@@ -19,8 +19,16 @@ typedef struct QEMUMachine {
     QEMUMachineInitFunc *init;
     int use_scsi;
     int max_cpus;
+    unsigned int no_serial:1,
+        no_parallel:1,
+        use_virtcon:1,
+        no_vga:1,
+        no_floppy:1,
+        no_cdrom:1,
+        no_sdcard:1;
     int is_default;
-    CompatProperty *compat_props;
+    const char *default_machine_opts;
+    GlobalProperty *compat_props;
     struct QEMUMachine *next;
 } QEMUMachine;
 

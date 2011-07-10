@@ -84,7 +84,7 @@ struct dma_s {
 
 static void soc_dma_ch_schedule(struct soc_dma_ch_s *ch, int delay_bytes)
 {
-    int64_t now = qemu_get_clock(vm_clock);
+    int64_t now = qemu_get_clock_ns(vm_clock);
     struct dma_s *dma = (struct dma_s *) ch->dma;
 
     qemu_mod_timer(ch->timer, now + delay_bytes / dma->channel_freq);
@@ -192,12 +192,13 @@ static void soc_dma_ch_freq_update(struct dma_s *s)
     if (s->enabled_count)
         /* We completely ignore channel priorities and stuff */
         s->channel_freq = s->soc.freq / s->enabled_count;
-    else
+    else {
         /* TODO: Signal that we want to disable the functional clock and let
          * the platform code decide what to do with it, i.e. check that
          * auto-idle is enabled in the clock controller and if we are stopping
          * the clock, do the same with any parent clocks that had only one
-         * user keeping them on and auto-idle enabled.  */;
+         * user keeping them on and auto-idle enabled.  */
+    }
 }
 
 void soc_dma_set_request(struct soc_dma_ch_s *ch, int level)
@@ -245,7 +246,7 @@ struct soc_dma_s *soc_dma_init(int n)
     for (i = 0; i < n; i ++) {
         s->ch[i].dma = &s->soc;
         s->ch[i].num = i;
-        s->ch[i].timer = qemu_new_timer(vm_clock, soc_dma_ch_run, &s->ch[i]);
+        s->ch[i].timer = qemu_new_timer_ns(vm_clock, soc_dma_ch_run, &s->ch[i]);
     }
 
     soc_dma_reset(&s->soc);

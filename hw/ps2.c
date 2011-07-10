@@ -110,14 +110,24 @@ typedef struct {
 
 /* Table to convert from PC scancodes to raw scancodes.  */
 static const unsigned char ps2_raw_keycode[128] = {
-          0,118, 22, 30, 38, 37, 46, 54, 61, 62, 70, 69, 78, 85,102, 13,
-         21, 29, 36, 45, 44, 53, 60, 67, 68, 77, 84, 91, 90, 20, 28, 27,
-         35, 43, 52, 51, 59, 66, 75, 76, 82, 14, 18, 93, 26, 34, 33, 42,
-         50, 49, 58, 65, 73, 74, 89,124, 17, 41, 88,  5,  6,  4, 12,  3,
-         11,  2, 10,  1,  9,119,126,108,117,125,123,107,115,116,121,105,
-        114,122,112,113,127, 96, 97,120,  7, 15, 23, 31, 39, 47, 55, 63,
-         71, 79, 86, 94,  8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 87,111,
-         19, 25, 57, 81, 83, 92, 95, 98, 99,100,101,103,104,106,109,110
+  0, 118,  22,  30,  38,  37,  46,  54,  61,  62,  70,  69,  78,  85, 102,  13,
+ 21,  29,  36,  45,  44,  53,  60,  67,  68,  77,  84,  91,  90,  20,  28,  27,
+ 35,  43,  52,  51,  59,  66,  75,  76,  82,  14,  18,  93,  26,  34,  33,  42,
+ 50,  49,  58,  65,  73,  74,  89, 124,  17,  41,  88,   5,   6,   4,  12,   3,
+ 11,   2,  10,   1,   9, 119, 126, 108, 117, 125, 123, 107, 115, 116, 121, 105,
+114, 122, 112, 113, 127,  96,  97, 120,   7,  15,  23,  31,  39,  47,  55,  63,
+ 71,  79,  86,  94,   8,  16,  24,  32,  40,  48,  56,  64,  72,  80,  87, 111,
+ 19,  25,  57,  81,  83,  92,  95,  98,  99, 100, 101, 103, 104, 106, 109, 110
+};
+static const unsigned char ps2_raw_keycode_set3[128] = {
+  0,   8,  22,  30,  38,  37,  46,  54,  61,  62,  70,  69,  78,  85, 102,  13,
+ 21,  29,  36,  45,  44,  53,  60,  67,  68,  77,  84,  91,  90,  17,  28,  27,
+ 35,  43,  52,  51,  59,  66,  75,  76,  82,  14,  18,  92,  26,  34,  33,  42,
+ 50,  49,  58,  65,  73,  74,  89, 126,  25,  41,  20,   7,  15,  23,  31,  39,
+ 47,   2,  63,  71,  79, 118,  95, 108, 117, 125, 132, 107, 115, 116, 124, 105,
+114, 122, 112, 113, 127,  96,  97,  86,  94,  15,  23,  31,  39,  47,  55,  63,
+ 71,  79,  86,  94,   8,  16,  24,  32,  40,  48,  56,  64,  72,  80,  87, 111,
+ 19,  25,  57,  81,  83,  92,  95,  98,  99, 100, 101, 103, 104, 106, 109, 110
 };
 
 void ps2_queue(void *opaque, int b)
@@ -143,12 +153,16 @@ static void ps2_put_keycode(void *opaque, int keycode)
 {
     PS2KbdState *s = opaque;
 
-    /* XXX: add support for scancode sets 1 and 3 */
-    if (!s->translate && keycode < 0xe0 && s->scancode_set == 2)
-      {
-        if (keycode & 0x80)
+    /* XXX: add support for scancode set 1 */
+    if (!s->translate && keycode < 0xe0 && s->scancode_set > 1) {
+        if (keycode & 0x80) {
             ps2_queue(&s->common, 0xf0);
-        keycode = ps2_raw_keycode[keycode & 0x7f];
+        }
+        if (s->scancode_set == 2) {
+            keycode = ps2_raw_keycode[keycode & 0x7f];
+        } else if (s->scancode_set == 3) {
+            keycode = ps2_raw_keycode_set3[keycode & 0x7f];
+        }
       }
     ps2_queue(&s->common, keycode);
 }
@@ -185,6 +199,7 @@ static void ps2_reset_keyboard(PS2KbdState *s)
 {
     s->scan_enabled = 1;
     s->scancode_set = 2;
+    kbd_put_ledstate(0);
 }
 
 void ps2_write_keyboard(void *opaque, int val)
@@ -259,6 +274,7 @@ void ps2_write_keyboard(void *opaque, int val)
         s->common.write_cmd = -1;
         break;
     case KBD_CMD_SET_LEDS:
+        kbd_put_ledstate(val);
         ps2_queue(&s->common, KBD_REPLY_ACK);
         s->common.write_cmd = -1;
         break;
@@ -593,7 +609,7 @@ void *ps2_kbd_init(void (*update_irq)(void *, int), void *update_arg)
     s->common.update_irq = update_irq;
     s->common.update_arg = update_arg;
     s->scancode_set = 2;
-    vmstate_register(0, &vmstate_ps2_keyboard, s);
+    vmstate_register(NULL, 0, &vmstate_ps2_keyboard, s);
     qemu_add_kbd_event_handler(ps2_put_keycode, s);
     qemu_register_reset(ps2_kbd_reset, s);
     return s;
@@ -605,7 +621,7 @@ void *ps2_mouse_init(void (*update_irq)(void *, int), void *update_arg)
 
     s->common.update_irq = update_irq;
     s->common.update_arg = update_arg;
-    vmstate_register(0, &vmstate_ps2_mouse, s);
+    vmstate_register(NULL, 0, &vmstate_ps2_mouse, s);
     qemu_add_mouse_event_handler(ps2_mouse_event, s, 0, "QEMU PS/2 Mouse");
     qemu_register_reset(ps2_mouse_reset, s);
     return s;

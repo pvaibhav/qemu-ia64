@@ -24,40 +24,11 @@
 #include "dyngen-exec.h"
 
 #include "cpu.h"
-#include "exec-all.h"
-
-/* Precise emulation is needed to correctly emulate exception flags */
-#define USE_PRECISE_EMULATION 1
 
 register struct CPUPPCState *env asm(AREG0);
 
 #if !defined(CONFIG_USER_ONLY)
 #include "softmmu_exec.h"
 #endif /* !defined(CONFIG_USER_ONLY) */
-
-static inline void env_to_regs(void)
-{
-}
-
-static inline void regs_to_env(void)
-{
-}
-
-static inline int cpu_has_work(CPUState *env)
-{
-    return (msr_ee && (env->interrupt_request & CPU_INTERRUPT_HARD));
-}
-
-
-static inline int cpu_halted(CPUState *env)
-{
-    if (!env->halted)
-        return 0;
-    if (cpu_has_work(env)) {
-        env->halted = 0;
-        return 0;
-    }
-    return EXCP_HALTED;
-}
 
 #endif /* !defined (__PPC_H__) */

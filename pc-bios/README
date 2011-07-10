@@ -1,4 +1,5 @@
-- The PC BIOS comes from the Bochs project (http://bochs.sourceforge.net/).
+- SeaBIOS (bios.bin) is the successor of pc bios.
+  See http://www.seabios.org/ for more information.
 
 - The VGA BIOS and the Cirrus VGA BIOS come from the LGPL VGA bios
   project (http://www.nongnu.org/vgabios/).
@@ -6,23 +7,29 @@
 - The PowerPC Open Hack'Ware Open Firmware Compatible BIOS is
   available at http://perso.magic.fr/l_indien/OpenHackWare/index.htm.
 
-- video.x is a PowerMac NDRV compatible driver for a VGA frame
-  buffer. It comes from the Mac-on-Linux project
-  (http://www.maconlinux.org/).
-
 - OpenBIOS (http://www.openbios.org/) is a free (GPL v2) portable
   firmware implementation. The goal is to implement a 100% IEEE
   1275-1994 (referred to as Open Firmware) compliant firmware.
-  The included images for Sparc32, Sparc64 and PowerPC (for 32 and 64 bit
-  PPC CPUs) are built from OpenBIOS SVN revision 569.
+  The included image for PowerPC (for 32 and 64 bit PPC CPUs),
 
-- The PXE roms come from Rom-o-Matic gPXE 0.9.9 with BANNER_TIMEOUT=0
+  PowerPC is built from OpenBIOS SVN revision 1044
+  Sparc32 and Sparc64 are built from OpenBIOS SVN revision 1018.
 
-  e1000 8086:100E
-  pcnet32 1022:2000
-  ns8390 1050:0940
-  rtl8139 10ec:8139
-  eepro100 8086:1209
-  virtio 1af4:1000
+- SLOF (Slimline Open Firmware) is a free IEEE 1275 Open Firmware
+  implementation for certain IBM POWER hardware.  The sources are at
+  https://github.com/dgibson/SLOF, and the image currently in qemu is
+  built from git tag qemu-slof-20110323.
 
-  http://rom-o-matic.net/
+- The PXE roms come from the iPXE project. Built with BANNER_TIME 0.
+  Sources available at http://ipxe.org.  Vendor:Device ID -> ROM mapping:
+
+	8086:100e -> pxe-e1000.rom
+	8086:1209 -> pxe-eepro100.rom
+	1050:0940 -> pxe-ne2k_pci.rom
+	1022:2000 -> pxe-pcnet.rom
+	10ec:8139 -> pxe-rtl8139.rom
+	1af4:1000 -> pxe-virtio.rom
+
+- The S390 zipl loader is an addition to the official IBM s390-tools
+  package. That fork is maintained in its own git repository at:
+  git://repo.or.cz/s390-tools.git

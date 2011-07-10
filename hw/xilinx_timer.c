@@ -23,7 +23,6 @@
  */
 
 #include "sysbus.h"
-#include "sysemu.h"
 #include "qemu-timer.h"
 
 #define D(x)
@@ -210,7 +209,8 @@ static int xilinx_timer_init(SysBusDevice *dev)
         ptimer_set_freq(xt->ptimer, t->freq_hz);
     }
 
-    timer_regs = cpu_register_io_memory(timer_read, timer_write, t);
+    timer_regs = cpu_register_io_memory(timer_read, timer_write, t,
+                                        DEVICE_NATIVE_ENDIAN);
     sysbus_init_mmio(dev, R_MAX * 4 * t->nr_timers, timer_regs);
     return 0;
 }

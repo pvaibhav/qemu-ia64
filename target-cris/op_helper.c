@@ -77,13 +77,13 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
             if (tb) {
                 /* the PC is inside the translated code. It means that we have
                    a virtual CPU fault */
-                cpu_restore_state(tb, env, pc, NULL);
+                cpu_restore_state(tb, env, pc);
 
 		/* Evaluate flags after retranslation.  */
                 helper_top_evaluate_flags();
             }
         }
-        cpu_loop_exit();
+        cpu_loop_exit(env);
     }
     env = saved_env;
 }
@@ -93,7 +93,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
 void helper_raise_exception(uint32_t index)
 {
 	env->exception_index = index;
-	cpu_loop_exit();
+        cpu_loop_exit(env);
 }
 
 void helper_tlb_flush_pid(uint32_t pid)
@@ -164,7 +164,9 @@ void helper_movl_sreg_reg (uint32_t sreg, uint32_t reg)
 
 			D_LOG("tlb flush vaddr=%x v=%d pc=%x\n", 
 				  vaddr, tlb_v, env->pc);
-			tlb_flush_page(env, vaddr);
+			if (tlb_v) {
+				tlb_flush_page(env, vaddr);
+			}
 		}
 	}
 #endif
@@ -276,6 +278,8 @@ uint32_t helper_btst(uint32_t t0, uint32_t t1, uint32_t ccs)
 
 	/* Clear the X, N and Z flags.  */
 	ccs = ccs & ~(X_FLAG | N_FLAG | Z_FLAG);
+	if (env->pregs[PR_VR] < 32)
+		ccs &= ~(V_FLAG | C_FLAG);
 	/* Set the N and Z flags accordingly.  */
 	ccs |= (bset << 3) | (fz << 2);
 	return ccs;

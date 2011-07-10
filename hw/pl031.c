@@ -44,6 +44,21 @@ typedef struct {
     uint32_t is;
 } pl031_state;
 
+static const VMStateDescription vmstate_pl031 = {
+    .name = "pl031",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(tick_offset, pl031_state),
+        VMSTATE_UINT32(mr, pl031_state),
+        VMSTATE_UINT32(lr, pl031_state),
+        VMSTATE_UINT32(cr, pl031_state),
+        VMSTATE_UINT32(im, pl031_state),
+        VMSTATE_UINT32(is, pl031_state),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static const unsigned char pl031_id[] = {
     0x31, 0x10, 0x14, 0x00,         /* Device ID        */
     0x0d, 0xf0, 0x05, 0xb1          /* Cell ID      */
@@ -65,9 +80,9 @@ static void pl031_interrupt(void * opaque)
 
 static uint32_t pl031_get_count(pl031_state *s)
 {
-    /* This assumes qemu_get_clock returns the time since the machine was
+    /* This assumes qemu_get_clock_ns returns the time since the machine was
        created.  */
-    return s->tick_offset + qemu_get_clock(vm_clock) / get_ticks_per_sec();
+    return s->tick_offset + qemu_get_clock_ns(vm_clock) / get_ticks_per_sec();
 }
 
 static void pl031_set_alarm(pl031_state *s)
@@ -75,7 +90,7 @@ static void pl031_set_alarm(pl031_state *s)
     int64_t now;
     uint32_t ticks;
 
-    now = qemu_get_clock(vm_clock);
+    now = qemu_get_clock_ns(vm_clock);
     ticks = s->tick_offset + now / get_ticks_per_sec();
 
     /* The timer wraps around.  This subtraction also wraps in the same way,
@@ -146,7 +161,7 @@ static void pl031_write(void * opaque, target_phys_addr_t offset,
         pl031_update(s);
         break;
     case RTC_ICR:
-        /* The PL031 documentation (DDI0224B) states that the interupt is
+        /* The PL031 documentation (DDI0224B) states that the interrupt is
            cleared when bit 0 of the written value is set.  However the
            arm926e documentation (DDI0287B) states that the interrupt is
            cleared when any value is written.  */
@@ -189,7 +204,8 @@ static int pl031_init(SysBusDevice *dev)
     pl031_state *s = FROM_SYSBUS(pl031_state, dev);
     struct tm tm;
 
-    iomemtype = cpu_register_io_memory(pl031_readfn, pl031_writefn, s);
+    iomemtype = cpu_register_io_memory(pl031_readfn, pl031_writefn, s,
+                                       DEVICE_NATIVE_ENDIAN);
     if (iomemtype == -1) {
         hw_error("pl031_init: Can't register I/O memory\n");
     }
@@ -201,13 +217,21 @@ static int pl031_init(SysBusDevice *dev)
     qemu_get_timedate(&tm, 0);
     s->tick_offset = mktimegm(&tm);
 
-    s->timer = qemu_new_timer(vm_clock, pl031_interrupt, s);
+    s->timer = qemu_new_timer_ns(vm_clock, pl031_interrupt, s);
     return 0;
 }
 
+static SysBusDeviceInfo pl031_info = {
+    .init = pl031_init,
+    .qdev.name = "pl031",
+    .qdev.size = sizeof(pl031_state),
+    .qdev.vmsd = &vmstate_pl031,
+    .qdev.no_user = 1,
+};
+
 static void pl031_register_devices(void)
 {
-    sysbus_register_dev("pl031", sizeof(pl031_state), pl031_init);
+    sysbus_register_withprop(&pl031_info);
 }
 
 device_init(pl031_register_devices)

@@ -998,29 +998,18 @@ static int es1370_initfn (PCIDevice *dev)
     ES1370State *s = DO_UPCAST (ES1370State, dev, dev);
     uint8_t *c = s->dev.config;
 
-    pci_config_set_vendor_id (c, PCI_VENDOR_ID_ENSONIQ);
-    pci_config_set_device_id (c, PCI_DEVICE_ID_ENSONIQ_ES1370);
-    c[0x07] = 2 << 1;
-    pci_config_set_class (c, PCI_CLASS_MULTIMEDIA_AUDIO);
+    c[PCI_STATUS + 1] = PCI_STATUS_DEVSEL_SLOW >> 8;
 
-#if 1
-    c[0x2c] = 0x42;
-    c[0x2d] = 0x49;
-    c[0x2e] = 0x4c;
-    c[0x2f] = 0x4c;
-#else
-    c[0x2c] = 0x74;
-    c[0x2d] = 0x12;
-    c[0x2e] = 0x71;
-    c[0x2f] = 0x13;
-    c[0x34] = 0xdc;
-    c[0x3c] = 10;
+#if 0
+    c[PCI_CAPABILITY_LIST] = 0xdc;
+    c[PCI_INTERRUPT_LINE] = 10;
     c[0xdc] = 0x00;
 #endif
 
-    c[0x3d] = 1;
-    c[0x3e] = 0x0c;
-    c[0x3f] = 0x80;
+    /* TODO: RST# value should be 0. */
+    c[PCI_INTERRUPT_PIN] = 1;
+    c[PCI_MIN_GNT] = 0x0c;
+    c[PCI_MAX_LAT] = 0x80;
 
     pci_register_bar (&s->dev, 0, 256, PCI_BASE_ADDRESS_SPACE_IO, es1370_map);
     qemu_register_reset (es1370_on_reset, s);
@@ -1042,6 +1031,16 @@ static PCIDeviceInfo es1370_info = {
     .qdev.size    = sizeof (ES1370State),
     .qdev.vmsd    = &vmstate_es1370,
     .init         = es1370_initfn,
+    .vendor_id    = PCI_VENDOR_ID_ENSONIQ,
+    .device_id    = PCI_DEVICE_ID_ENSONIQ_ES1370,
+    .class_id     = PCI_CLASS_MULTIMEDIA_AUDIO,
+#if 1
+    .subsystem_vendor_id = 0x4942,
+    .subsystem_id = 0x4c4c,
+#else
+    .subsystem_vendor_id = 0x1274,
+    .subsystem_id = 0x1371,
+#endif
 };
 
 static void es1370_register (void)

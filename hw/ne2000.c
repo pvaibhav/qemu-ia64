@@ -26,6 +26,7 @@
 #include "net.h"
 #include "ne2000.h"
 #include "loader.h"
+#include "sysemu.h"
 
 /* debug NE2000 card */
 //#define DEBUG_NE2000
@@ -720,11 +721,8 @@ static int pci_ne2000_init(PCIDevice *pci_dev)
     uint8_t *pci_conf;
 
     pci_conf = d->dev.config;
-    pci_config_set_vendor_id(pci_conf, PCI_VENDOR_ID_REALTEK);
-    pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_REALTEK_8029);
-    pci_config_set_class(pci_conf, PCI_CLASS_NETWORK_ETHERNET);
-    pci_conf[PCI_HEADER_TYPE] = PCI_HEADER_TYPE_NORMAL; // header_type
-    pci_conf[0x3d] = 1; // interrupt pin 0
+    /* TODO: RST# value should be 0. PCI spec 6.2.4 */
+    pci_conf[PCI_INTERRUPT_PIN] = 1; // interrupt pin 0
 
     pci_register_bar(&d->dev, 0, 0x100,
                            PCI_BASE_ADDRESS_SPACE_IO, ne2000_map);
@@ -741,10 +739,12 @@ static int pci_ne2000_init(PCIDevice *pci_dev)
     if (!pci_dev->qdev.hotplugged) {
         static int loaded = 0;
         if (!loaded) {
-            rom_add_option("pxe-ne2k_pci.bin");
+            rom_add_option("pxe-ne2k_pci.rom", -1);
             loaded = 1;
         }
     }
+
+    add_boot_device_path(s->c.bootindex, &pci_dev->qdev, "/ethernet-phy@0");
 
     return 0;
 }
@@ -764,6 +764,9 @@ static PCIDeviceInfo ne2000_info = {
     .qdev.vmsd  = &vmstate_pci_ne2000,
     .init       = pci_ne2000_init,
     .exit       = pci_ne2000_exit,
+    .vendor_id  = PCI_VENDOR_ID_REALTEK,
+    .device_id  = PCI_DEVICE_ID_REALTEK_8029,
+    .class_id   = PCI_CLASS_NETWORK_ETHERNET,
     .qdev.props = (Property[]) {
         DEFINE_NIC_PROPERTIES(PCINE2000State, ne2000.c),
         DEFINE_PROP_END_OF_LIST(),

@@ -1,8 +1,8 @@
 #include <signal.h>
 #include "xen_backend.h"
 #include "xen_domainbuild.h"
-#include "sysemu.h"
 #include "qemu-timer.h"
+#include "qemu-log.h"
 
 #include <xenguest.h>
 
@@ -148,7 +148,7 @@ static void xen_domain_poll(void *opaque)
         goto quit;
     }
 
-    qemu_mod_timer(xen_poll, qemu_get_clock(rt_clock) + 1000);
+    qemu_mod_timer(xen_poll, qemu_get_clock_ms(rt_clock) + 1000);
     return;
 
 quit:
@@ -156,15 +156,18 @@ quit:
     return;
 }
 
-static void xen_domain_watcher(void)
+static int xen_domain_watcher(void)
 {
     int qemu_running = 1;
     int fd[2], i, n, rc;
     char byte;
 
-    pipe(fd);
+    if (pipe(fd) != 0) {
+        qemu_log("%s: Huh? pipe error: %s\n", __FUNCTION__, strerror(errno));
+        return -1;
+    }
     if (fork() != 0)
-        return; /* not child */
+        return 0; /* not child */
 
     /* close all file handles, except stdio/out/err,
      * our watch pipe and the xen interface handle */
@@ -172,8 +175,9 @@ static void xen_domain_watcher(void)
     for (i = 3; i < n; i++) {
         if (i == fd[0])
             continue;
-        if (i == xen_xc)
+        if (i == xc_fd(xen_xc)) {
             continue;
+        }
         close(i);
     }
 
@@ -238,7 +242,9 @@ int xen_domain_build_pv(const char *kernel, const char *ramdisk,
     }
     qemu_log("xen: created domain %d\n", xen_domid);
     atexit(xen_domain_cleanup);
-    xen_domain_watcher();
+    if (xen_domain_watcher() == -1) {
+        goto err;
+    }
 
     xenstore_domain_init1(kernel, ramdisk, cmdline);
 
@@ -285,8 +291,8 @@ int xen_domain_build_pv(const char *kernel, const char *ramdisk,
         goto err;
     }
 
-    xen_poll = qemu_new_timer(rt_clock, xen_domain_poll, NULL);
-    qemu_mod_timer(xen_poll, qemu_get_clock(rt_clock) + 1000);
+    xen_poll = qemu_new_timer_ms(rt_clock, xen_domain_poll, NULL);
+    qemu_mod_timer(xen_poll, qemu_get_clock_ms(rt_clock) + 1000);
     return 0;
 
 err:

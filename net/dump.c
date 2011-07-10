@@ -24,8 +24,9 @@
 
 #include "dump.h"
 #include "qemu-common.h"
-#include "sysemu.h"
+#include "qemu-error.h"
 #include "qemu-log.h"
+#include "qemu-timer.h"
 
 typedef struct DumpState {
     VLANClientState nc;
@@ -66,7 +67,7 @@ static ssize_t dump_receive(VLANClientState *nc, const uint8_t *buf, size_t size
         return size;
     }
 
-    ts = muldiv64(qemu_get_clock(vm_clock), 1000000, get_ticks_per_sec());
+    ts = muldiv64(qemu_get_clock_ns(vm_clock), 1000000, get_ticks_per_sec());
     caplen = size > s->pcap_caplen ? s->pcap_caplen : size;
 
     hdr.ts.tv_sec = ts / 1000000;
@@ -107,7 +108,7 @@ static int net_dump_init(VLANState *vlan, const char *device,
 
     fd = open(filename, O_CREAT | O_WRONLY | O_BINARY, 0644);
     if (fd < 0) {
-        qemu_error("-net dump: can't open %s\n", filename);
+        error_report("-net dump: can't open %s", filename);
         return -1;
     }
 
@@ -120,7 +121,7 @@ static int net_dump_init(VLANState *vlan, const char *device,
     hdr.linktype = 1;
 
     if (write(fd, &hdr, sizeof(hdr)) < sizeof(hdr)) {
-        qemu_error("-net dump write error: %s\n", strerror(errno));
+        error_report("-net dump write error: %s", strerror(errno));
         close(fd);
         return -1;
     }

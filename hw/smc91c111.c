@@ -46,6 +46,35 @@ typedef struct {
     int mmio_index;
 } smc91c111_state;
 
+static const VMStateDescription vmstate_smc91c111 = {
+    .name = "smc91c111",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields      = (VMStateField []) {
+        VMSTATE_UINT16(tcr, smc91c111_state),
+        VMSTATE_UINT16(rcr, smc91c111_state),
+        VMSTATE_UINT16(cr, smc91c111_state),
+        VMSTATE_UINT16(ctr, smc91c111_state),
+        VMSTATE_UINT16(gpr, smc91c111_state),
+        VMSTATE_UINT16(ptr, smc91c111_state),
+        VMSTATE_UINT16(ercv, smc91c111_state),
+        VMSTATE_INT32(bank, smc91c111_state),
+        VMSTATE_INT32(packet_num, smc91c111_state),
+        VMSTATE_INT32(tx_alloc, smc91c111_state),
+        VMSTATE_INT32(allocated, smc91c111_state),
+        VMSTATE_INT32(tx_fifo_len, smc91c111_state),
+        VMSTATE_INT32_ARRAY(tx_fifo, smc91c111_state, NUM_PACKETS),
+        VMSTATE_INT32(rx_fifo_len, smc91c111_state),
+        VMSTATE_INT32_ARRAY(rx_fifo, smc91c111_state, NUM_PACKETS),
+        VMSTATE_INT32(tx_fifo_done_len, smc91c111_state),
+        VMSTATE_INT32_ARRAY(tx_fifo_done, smc91c111_state, NUM_PACKETS),
+        VMSTATE_BUFFER_UNSAFE(data, smc91c111_state, 0, NUM_PACKETS * 2048),
+        VMSTATE_UINT8(int_level, smc91c111_state),
+        VMSTATE_UINT8(int_mask, smc91c111_state),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 #define RCR_SOFT_RST  0x8000
 #define RCR_STRIP_CRC 0x0200
 #define RCR_RXEN      0x0100
@@ -160,7 +189,6 @@ static void smc91c111_do_tx(smc91c111_state *s)
     int i;
     int len;
     int control;
-    int add_crc;
     int packetnum;
     uint8_t *p;
 
@@ -187,20 +215,22 @@ static void smc91c111_do_tx(smc91c111_state *s)
             len = 64;
         }
 #if 0
-        /* The card is supposed to append the CRC to the frame.  However
-           none of the other network traffic has the CRC appended.
-           Suspect this is low level ethernet detail we don't need to worry
-           about.  */
-        add_crc = (control & 0x10) || (s->tcr & TCR_NOCRC) == 0;
-        if (add_crc) {
-            uint32_t crc;
+        {
+            int add_crc;
 
-            crc = crc32(~0, p, len);
-            memcpy(p + len, &crc, 4);
-            len += 4;
+            /* The card is supposed to append the CRC to the frame.
+               However none of the other network traffic has the CRC
+               appended.  Suspect this is low level ethernet detail we
+               don't need to worry about.  */
+            add_crc = (control & 0x10) || (s->tcr & TCR_NOCRC) == 0;
+            if (add_crc) {
+                uint32_t crc;
+
+                crc = crc32(~0, p, len);
+                memcpy(p + len, &crc, 4);
+                len += 4;
+            }
         }
-#else
-        add_crc = 0;
 #endif
         if (s->ctr & CTR_AUTO_RELEASE)
             /* Race?  */
@@ -222,8 +252,9 @@ static void smc91c111_queue_tx(smc91c111_state *s, int packet)
     smc91c111_do_tx(s);
 }
 
-static void smc91c111_reset(smc91c111_state *s)
+static void smc91c111_reset(DeviceState *dev)
 {
+    smc91c111_state *s = FROM_SYSBUS(smc91c111_state, sysbus_from_qdev(dev));
     s->bank = 0;
     s->tx_fifo_len = 0;
     s->tx_fifo_done_len = 0;
@@ -250,6 +281,7 @@ static void smc91c111_writeb(void *opaque, target_phys_addr_t offset,
 {
     smc91c111_state *s = (smc91c111_state *)opaque;
 
+    offset = offset & 0xf;
     if (offset == 14) {
         s->bank = value;
         return;
@@ -271,10 +303,12 @@ static void smc91c111_writeb(void *opaque, target_phys_addr_t offset,
         case 5:
             SET_HIGH(rcr, value);
             if (s->rcr & RCR_SOFT_RST)
-                smc91c111_reset(s);
+                smc91c111_reset(&s->busdev.qdev);
             return;
         case 10: case 11: /* RPCR */
             /* Ignored */
+            return;
+        case 12: case 13: /* Reserved */
             return;
         }
         break;
@@ -421,6 +455,7 @@ static uint32_t smc91c111_readb(void *opaque, target_phys_addr_t offset)
 {
     smc91c111_state *s = (smc91c111_state *)opaque;
 
+    offset = offset & 0xf;
     if (offset == 14) {
         return s->bank;
     }
@@ -460,6 +495,8 @@ static uint32_t smc91c111_readb(void *opaque, target_phys_addr_t offset)
             }
         case 10: case 11: /* RPCR */
             /* Not implemented.  */
+            return 0;
+        case 12: case 13: /* Reserved */
             return 0;
         }
         break;
@@ -664,14 +701,14 @@ static ssize_t smc91c111_receive(VLANClientState *nc, const uint8_t *buf, size_t
         *(p++) = crc & 0xff; crc >>= 8;
         *(p++) = crc & 0xff; crc >>= 8;
         *(p++) = crc & 0xff; crc >>= 8;
-        *(p++) = crc & 0xff; crc >>= 8;
+        *(p++) = crc & 0xff;
     }
     if (size & 1) {
         *(p++) = buf[size - 1];
-        *(p++) = 0x60;
+        *p = 0x60;
     } else {
         *(p++) = 0;
-        *(p++) = 0x40;
+        *p = 0x40;
     }
     /* TODO: Raise early RX interrupt?  */
     s->int_level |= INT_RCV;
@@ -712,13 +749,11 @@ static int smc91c111_init1(SysBusDevice *dev)
     smc91c111_state *s = FROM_SYSBUS(smc91c111_state, dev);
 
     s->mmio_index = cpu_register_io_memory(smc91c111_readfn,
-                                           smc91c111_writefn, s);
+                                           smc91c111_writefn, s,
+                                           DEVICE_NATIVE_ENDIAN);
     sysbus_init_mmio(dev, 16, s->mmio_index);
     sysbus_init_irq(dev, &s->irq);
     qemu_macaddr_default_if_unset(&s->conf.macaddr);
-
-    smc91c111_reset(s);
-
     s->nic = qemu_new_nic(&net_smc91c111_info, &s->conf,
                           dev->qdev.info->name, dev->qdev.id, s);
     qemu_format_nic_info_str(&s->nic->nc, s->conf.macaddr.a);
@@ -730,6 +765,8 @@ static SysBusDeviceInfo smc91c111_info = {
     .init = smc91c111_init1,
     .qdev.name  = "smc91c111",
     .qdev.size  = sizeof(smc91c111_state),
+    .qdev.vmsd = &vmstate_smc91c111,
+    .qdev.reset = smc91c111_reset,
     .qdev.props = (Property[]) {
         DEFINE_NIC_PROPERTIES(smc91c111_state, conf),
         DEFINE_PROP_END_OF_LIST(),

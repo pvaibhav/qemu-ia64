@@ -425,7 +425,6 @@ static uint32_t tusb_async_readw(void *opaque, target_phys_addr_t addr)
         return s->rx_config[epnum];
     case TUSB_EP_MAX_PACKET_SIZE_OFFSET ...
             (TUSB_EP_MAX_PACKET_SIZE_OFFSET + 0x3b):
-        epnum = (offset - TUSB_EP_MAX_PACKET_SIZE_OFFSET) >> 2;
         return 0x00000000;	/* TODO */
     case TUSB_WAIT_COUNT:
         return 0x00;		/* TODO */
@@ -521,7 +520,7 @@ static void tusb_async_writew(void *opaque, target_phys_addr_t addr,
     case TUSB_DEV_OTG_TIMER:
         s->otg_timer_val = value;
         if (value & TUSB_DEV_OTG_TIMER_ENABLE)
-            qemu_mod_timer(s->otg_timer, qemu_get_clock(vm_clock) +
+            qemu_mod_timer(s->otg_timer, qemu_get_clock_ns(vm_clock) +
                             muldiv64(TUSB_DEV_OTG_TIMER_VAL(value),
                                      get_ticks_per_sec(), TUSB_DEVCLOCK));
         else
@@ -630,7 +629,6 @@ static void tusb_async_writew(void *opaque, target_phys_addr_t addr,
         break;
     case TUSB_EP_MAX_PACKET_SIZE_OFFSET ...
             (TUSB_EP_MAX_PACKET_SIZE_OFFSET + 0x3b):
-        epnum = (offset - TUSB_EP_MAX_PACKET_SIZE_OFFSET) >> 2;
         return;		/* TODO */
     case TUSB_WAIT_COUNT:
         return;		/* TODO */
@@ -742,10 +740,10 @@ TUSBState *tusb6010_init(qemu_irq intr)
     s->intr = 0x00000000;
     s->otg_timer_val = 0;
     s->iomemtype[1] = cpu_register_io_memory(tusb_async_readfn,
-                    tusb_async_writefn, s);
+                    tusb_async_writefn, s, DEVICE_NATIVE_ENDIAN);
     s->irq = intr;
-    s->otg_timer = qemu_new_timer(vm_clock, tusb_otg_tick, s);
-    s->pwr_timer = qemu_new_timer(vm_clock, tusb_power_tick, s);
+    s->otg_timer = qemu_new_timer_ns(vm_clock, tusb_otg_tick, s);
+    s->pwr_timer = qemu_new_timer_ns(vm_clock, tusb_power_tick, s);
     s->musb = musb_init(qemu_allocate_irqs(tusb_musb_core_intr, s,
                             __musb_irq_max));
 
@@ -763,6 +761,6 @@ void tusb6010_power(TUSBState *s, int on)
         s->intr_ok = 0;
         tusb_intr_update(s);
         qemu_mod_timer(s->pwr_timer,
-                       qemu_get_clock(vm_clock) + get_ticks_per_sec() / 2);
+                       qemu_get_clock_ns(vm_clock) + get_ticks_per_sec() / 2);
     }
 }

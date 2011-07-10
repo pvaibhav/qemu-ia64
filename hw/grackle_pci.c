@@ -57,23 +57,6 @@ static void pci_grackle_set_irq(void *opaque, int irq_num, int level)
     qemu_set_irq(pic[irq_num + 0x15], level);
 }
 
-static void pci_grackle_save(QEMUFile* f, void *opaque)
-{
-    PCIDevice *d = opaque;
-
-    pci_device_save(d, f);
-}
-
-static int pci_grackle_load(QEMUFile* f, void *opaque, int version_id)
-{
-    PCIDevice *d = opaque;
-
-    if (version_id != 1)
-        return -EINVAL;
-
-    return pci_device_load(d, f);
-}
-
 static void pci_grackle_reset(void *opaque)
 {
 }
@@ -108,66 +91,20 @@ static int pci_grackle_init_device(SysBusDevice *dev)
 
     s = FROM_SYSBUS(GrackleState, dev);
 
-    pci_mem_config = pci_host_conf_register_mmio(&s->host_state);
-    pci_mem_data = pci_host_data_register_mmio(&s->host_state);
+    pci_mem_config = pci_host_conf_register_mmio(&s->host_state,
+                                                 DEVICE_LITTLE_ENDIAN);
+    pci_mem_data = pci_host_data_register_mmio(&s->host_state,
+                                               DEVICE_LITTLE_ENDIAN);
     sysbus_init_mmio(dev, 0x1000, pci_mem_config);
     sysbus_init_mmio(dev, 0x1000, pci_mem_data);
 
-    register_savevm("grackle", 0, 1, pci_grackle_save, pci_grackle_load,
-                    &s->host_state);
     qemu_register_reset(pci_grackle_reset, &s->host_state);
-    return 0;
-}
-
-static int pci_dec_21154_init_device(SysBusDevice *dev)
-{
-    GrackleState *s;
-    int pci_mem_config, pci_mem_data;
-
-    s = FROM_SYSBUS(GrackleState, dev);
-
-    pci_mem_config = pci_host_conf_register_mmio(&s->host_state);
-    pci_mem_data = pci_host_data_register_mmio(&s->host_state);
-    sysbus_init_mmio(dev, 0x1000, pci_mem_config);
-    sysbus_init_mmio(dev, 0x1000, pci_mem_data);
     return 0;
 }
 
 static int grackle_pci_host_init(PCIDevice *d)
 {
-    pci_config_set_vendor_id(d->config, PCI_VENDOR_ID_MOTOROLA);
-    pci_config_set_device_id(d->config, PCI_DEVICE_ID_MOTOROLA_MPC106);
-    d->config[0x08] = 0x00; // revision
     d->config[0x09] = 0x01;
-    pci_config_set_class(d->config, PCI_CLASS_BRIDGE_HOST);
-    d->config[PCI_HEADER_TYPE] = PCI_HEADER_TYPE_NORMAL; // header_type
-    return 0;
-}
-
-static int dec_21154_pci_host_init(PCIDevice *d)
-{
-    /* PCI2PCI bridge same values as PearPC - check this */
-    pci_config_set_vendor_id(d->config, PCI_VENDOR_ID_DEC);
-    pci_config_set_device_id(d->config, PCI_DEVICE_ID_DEC_21154);
-    d->config[0x08] = 0x02; // revision
-    pci_config_set_class(d->config, PCI_CLASS_BRIDGE_PCI);
-    d->config[PCI_HEADER_TYPE] = PCI_HEADER_TYPE_BRIDGE; // header_type
-
-    d->config[0x18] = 0x0;  // primary_bus
-    d->config[0x19] = 0x1;  // secondary_bus
-    d->config[0x1a] = 0x1;  // subordinate_bus
-    d->config[0x1c] = 0x10; // io_base
-    d->config[0x1d] = 0x20; // io_limit
-
-    d->config[0x20] = 0x80; // memory_base
-    d->config[0x21] = 0x80;
-    d->config[0x22] = 0x90; // memory_limit
-    d->config[0x23] = 0x80;
-
-    d->config[0x24] = 0x00; // prefetchable_memory_base
-    d->config[0x25] = 0x84;
-    d->config[0x26] = 0x00; // prefetchable_memory_limit
-    d->config[0x27] = 0x85;
     return 0;
 }
 
@@ -175,12 +112,10 @@ static PCIDeviceInfo grackle_pci_host_info = {
     .qdev.name = "grackle",
     .qdev.size = sizeof(PCIDevice),
     .init      = grackle_pci_host_init,
-};
-
-static PCIDeviceInfo dec_21154_pci_host_info = {
-    .qdev.name = "DEC 21154",
-    .qdev.size = sizeof(PCIDevice),
-    .init      = dec_21154_pci_host_init,
+    .vendor_id = PCI_VENDOR_ID_MOTOROLA,
+    .device_id = PCI_DEVICE_ID_MOTOROLA_MPC106,
+    .revision  = 0x00,
+    .class_id  = PCI_CLASS_BRIDGE_HOST,
 };
 
 static void grackle_register_devices(void)
@@ -188,9 +123,6 @@ static void grackle_register_devices(void)
     sysbus_register_dev("grackle", sizeof(GrackleState),
                         pci_grackle_init_device);
     pci_qdev_register(&grackle_pci_host_info);
-    sysbus_register_dev("DEC 21154", sizeof(GrackleState),
-                        pci_dec_21154_init_device);
-    pci_qdev_register(&dec_21154_pci_host_info);
 }
 
 device_init(grackle_register_devices)

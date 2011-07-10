@@ -47,12 +47,12 @@ typedef uint64_t TCGRegSet;
 #error unsupported
 #endif
 
-enum {
-#define DEF(s, n, copy_size) INDEX_op_ ## s,
+typedef enum TCGOpcode {
+#define DEF(name, oargs, iargs, cargs, flags) INDEX_op_ ## name,
 #include "tcg-opc.h"
 #undef DEF
     NB_OPS,
-};
+} TCGOpcode;
 
 #define tcg_regset_clear(d) (d) = 0
 #define tcg_regset_set(d, s) (d) = (s)
@@ -96,17 +96,29 @@ typedef struct TCGPool {
    this value, they are statically allocated in the TB stack frame */
 #define TCG_STATIC_CALL_ARGS_SIZE 128
 
-typedef int TCGType;
+typedef enum TCGType {
+    TCG_TYPE_I32,
+    TCG_TYPE_I64,
+    TCG_TYPE_COUNT, /* number of different types */
 
-#define TCG_TYPE_I32 0
-#define TCG_TYPE_I64 1
-#define TCG_TYPE_COUNT 2 /* number of different types */
-
+    /* An alias for the size of the host register.  */
 #if TCG_TARGET_REG_BITS == 32
-#define TCG_TYPE_PTR TCG_TYPE_I32
+    TCG_TYPE_REG = TCG_TYPE_I32,
 #else
-#define TCG_TYPE_PTR TCG_TYPE_I64
+    TCG_TYPE_REG = TCG_TYPE_I64,
 #endif
+
+    /* An alias for the size of the native pointer.  We don't currently
+       support any hosts with 64-bit registers and 32-bit pointers.  */
+    TCG_TYPE_PTR = TCG_TYPE_REG,
+
+    /* An alias for the size of the target "long", aka register.  */
+#if TARGET_LONG_BITS == 64
+    TCG_TYPE_TL = TCG_TYPE_I64,
+#else
+    TCG_TYPE_TL = TCG_TYPE_I32,
+#endif
+} TCGType;
 
 typedef tcg_target_ulong TCGArg;
 
@@ -117,7 +129,7 @@ typedef tcg_target_ulong TCGArg;
    We use plain int by default to avoid this runtime overhead.
    Users of tcg_gen_* don't need to know about any of this, and should
    treat TCGv as an opaque type.
-   In additon we do typechecking for different types of variables.  TCGv_i32
+   In addition we do typechecking for different types of variables.  TCGv_i32
    and TCGv_i64 are 32/64-bit variables respectively.  TCGv and TCGv_ptr
    are aliases for target_ulong and host pointer sized values respectively.
  */
@@ -138,12 +150,19 @@ typedef struct
     int i64;
 } TCGv_i64;
 
+typedef struct {
+    int iptr;
+} TCGv_ptr;
+
 #define MAKE_TCGV_I32(i) __extension__                  \
     ({ TCGv_i32 make_tcgv_tmp = {i}; make_tcgv_tmp;})
 #define MAKE_TCGV_I64(i) __extension__                  \
     ({ TCGv_i64 make_tcgv_tmp = {i}; make_tcgv_tmp;})
+#define MAKE_TCGV_PTR(i) __extension__                  \
+    ({ TCGv_ptr make_tcgv_tmp = {i}; make_tcgv_tmp; })
 #define GET_TCGV_I32(t) ((t).i32)
 #define GET_TCGV_I64(t) ((t).i64)
+#define GET_TCGV_PTR(t) ((t).iptr)
 #if TCG_TARGET_REG_BITS == 32
 #define TCGV_LOW(t) MAKE_TCGV_I32(GET_TCGV_I64(t))
 #define TCGV_HIGH(t) MAKE_TCGV_I32(GET_TCGV_I64(t) + 1)
@@ -153,10 +172,17 @@ typedef struct
 
 typedef int TCGv_i32;
 typedef int TCGv_i64;
+#if TCG_TARGET_REG_BITS == 32
+#define TCGv_ptr TCGv_i32
+#else
+#define TCGv_ptr TCGv_i64
+#endif
 #define MAKE_TCGV_I32(x) (x)
 #define MAKE_TCGV_I64(x) (x)
+#define MAKE_TCGV_PTR(x) (x)
 #define GET_TCGV_I32(t) (t)
 #define GET_TCGV_I64(t) (t)
+#define GET_TCGV_PTR(t) (t)
 
 #if TCG_TARGET_REG_BITS == 32
 #define TCGV_LOW(t) (t)
@@ -205,6 +231,24 @@ typedef enum {
     TCG_COND_GTU,
 } TCGCond;
 
+/* Invert the sense of the comparison.  */
+static inline TCGCond tcg_invert_cond(TCGCond c)
+{
+    return (TCGCond)(c ^ 1);
+}
+
+/* Swap the operands in a comparison.  */
+static inline TCGCond tcg_swap_cond(TCGCond c)
+{
+    int mask = (c < TCG_COND_LT ? 0 : c < TCG_COND_LTU ? 7 : 15);
+    return (TCGCond)(c ^ mask);
+}
+
+static inline TCGCond tcg_unsigned_cond(TCGCond c)
+{
+    return (c >= TCG_COND_LT && c <= TCG_COND_GT ? c + 4 : c);
+}
+
 #define TEMP_VAL_DEAD  0
 #define TEMP_VAL_REG   1
 #define TEMP_VAL_MEM   2
@@ -222,9 +266,9 @@ typedef struct TCGTemp {
     unsigned int fixed_reg:1;
     unsigned int mem_coherent:1;
     unsigned int mem_allocated:1;
-    unsigned int temp_local:1; /* If true, the temp is saved accross
+    unsigned int temp_local:1; /* If true, the temp is saved across
                                   basic blocks. Otherwise, it is not
-                                  preserved accross basic blocks. */
+                                  preserved across basic blocks. */
     unsigned int temp_allocated:1; /* never used for code gen */
     /* index of next free temp of same base type, -1 if end */
     int next_free_temp;
@@ -256,8 +300,8 @@ struct TCGContext {
     uint16_t *tb_jmp_offset; /* != NULL if USE_DIRECT_JUMP */
 
     /* liveness analysis */
-    uint16_t *op_dead_iargs; /* for each operation, each bit tells if the
-                                corresponding input argument is dead */
+    uint16_t *op_dead_args; /* for each operation, each bit tells if the
+                               corresponding argument is dead */
     
     /* tells in which temporary a given register is. It does not take
        into account fixed registers */
@@ -293,6 +337,10 @@ struct TCGContext {
     int64_t restore_count;
     int64_t restore_time;
 #endif
+
+#ifdef CONFIG_DEBUG_TCG
+    int temps_in_use;
+#endif
 };
 
 extern TCGContext tcg_ctx;
@@ -323,6 +371,7 @@ static inline void *tcg_malloc(int size)
 }
 
 void tcg_context_init(TCGContext *s);
+void tcg_prologue_init(TCGContext *s);
 void tcg_func_start(TCGContext *s);
 
 int tcg_gen_code(TCGContext *s, uint8_t *gen_code_buf);
@@ -361,8 +410,20 @@ static inline TCGv_i64 tcg_temp_local_new_i64(void)
 void tcg_temp_free_i64(TCGv_i64 arg);
 char *tcg_get_arg_str_i64(TCGContext *s, char *buf, int buf_size, TCGv_i64 arg);
 
-void tcg_dump_info(FILE *f,
-                   int (*cpu_fprintf)(FILE *f, const char *fmt, ...));
+#if defined(CONFIG_DEBUG_TCG)
+/* If you call tcg_clear_temp_count() at the start of a section of
+ * code which is not supposed to leak any TCG temporaries, then
+ * calling tcg_check_temp_count() at the end of the section will
+ * return 1 if the section did in fact leak a temporary.
+ */
+void tcg_clear_temp_count(void);
+int tcg_check_temp_count(void);
+#else
+#define tcg_clear_temp_count() do { } while (0)
+#define tcg_check_temp_count() 0
+#endif
+
+void tcg_dump_info(FILE *f, fprintf_function cpu_fprintf);
 
 #define TCG_CT_ALIAS  0x80
 #define TCG_CT_IALIAS 0x40
@@ -391,18 +452,17 @@ typedef struct TCGOpDef {
     const char *name;
     uint8_t nb_oargs, nb_iargs, nb_cargs, nb_args;
     uint8_t flags;
-    uint16_t copy_size;
     TCGArgConstraint *args_ct;
     int *sorted_args;
+#if defined(CONFIG_DEBUG_TCG)
+    int used;
+#endif
 } TCGOpDef;
         
 typedef struct TCGTargetOpDef {
-    int op;
+    TCGOpcode op;
     const char *args_ct_str[TCG_MAX_OP_ARGS];
 } TCGTargetOpDef;
-
-void tcg_target_init(TCGContext *s);
-void tcg_target_qemu_prologue(TCGContext *s);
 
 #define tcg_abort() \
 do {\
@@ -413,25 +473,27 @@ do {\
 void tcg_add_target_add_op_defs(const TCGTargetOpDef *tdefs);
 
 #if TCG_TARGET_REG_BITS == 32
-#define tcg_const_ptr tcg_const_i32
-#define tcg_add_ptr tcg_add_i32
-#define tcg_sub_ptr tcg_sub_i32
-#define TCGv_ptr TCGv_i32
-#define GET_TCGV_PTR GET_TCGV_I32
-#define tcg_global_reg_new_ptr tcg_global_reg_new_i32
-#define tcg_global_mem_new_ptr tcg_global_mem_new_i32
-#define tcg_temp_new_ptr tcg_temp_new_i32
-#define tcg_temp_free_ptr tcg_temp_free_i32
+#define TCGV_NAT_TO_PTR(n) MAKE_TCGV_PTR(GET_TCGV_I32(n))
+#define TCGV_PTR_TO_NAT(n) MAKE_TCGV_I32(GET_TCGV_PTR(n))
+
+#define tcg_const_ptr(V) TCGV_NAT_TO_PTR(tcg_const_i32(V))
+#define tcg_global_reg_new_ptr(R, N) \
+    TCGV_NAT_TO_PTR(tcg_global_reg_new_i32((R), (N)))
+#define tcg_global_mem_new_ptr(R, O, N) \
+    TCGV_NAT_TO_PTR(tcg_global_mem_new_i32((R), (O), (N)))
+#define tcg_temp_new_ptr() TCGV_NAT_TO_PTR(tcg_temp_new_i32())
+#define tcg_temp_free_ptr(T) tcg_temp_free_i32(TCGV_PTR_TO_NAT(T))
 #else
-#define tcg_const_ptr tcg_const_i64
-#define tcg_add_ptr tcg_add_i64
-#define tcg_sub_ptr tcg_sub_i64
-#define TCGv_ptr TCGv_i64
-#define GET_TCGV_PTR GET_TCGV_I64
-#define tcg_global_reg_new_ptr tcg_global_reg_new_i64
-#define tcg_global_mem_new_ptr tcg_global_mem_new_i64
-#define tcg_temp_new_ptr tcg_temp_new_i64
-#define tcg_temp_free_ptr tcg_temp_free_i64
+#define TCGV_NAT_TO_PTR(n) MAKE_TCGV_PTR(GET_TCGV_I64(n))
+#define TCGV_PTR_TO_NAT(n) MAKE_TCGV_I64(GET_TCGV_PTR(n))
+
+#define tcg_const_ptr(V) TCGV_NAT_TO_PTR(tcg_const_i64(V))
+#define tcg_global_reg_new_ptr(R, N) \
+    TCGV_NAT_TO_PTR(tcg_global_reg_new_i64((R), (N)))
+#define tcg_global_mem_new_ptr(R, O, N) \
+    TCGV_NAT_TO_PTR(tcg_global_mem_new_i64((R), (O), (N)))
+#define tcg_temp_new_ptr() TCGV_NAT_TO_PTR(tcg_temp_new_i64())
+#define tcg_temp_free_ptr(T) tcg_temp_free_i64(TCGV_PTR_TO_NAT(T))
 #endif
 
 void tcg_gen_callN(TCGContext *s, TCGv_ptr func, unsigned int flags,
@@ -451,13 +513,11 @@ TCGv_i64 tcg_const_i64(int64_t val);
 TCGv_i32 tcg_const_local_i32(int32_t val);
 TCGv_i64 tcg_const_local_i64(int64_t val);
 
-void tcg_out_reloc(TCGContext *s, uint8_t *code_ptr, int type, 
-                   int label_index, long addend);
-
 extern uint8_t code_gen_prologue[];
 #if defined(_ARCH_PPC) && !defined(_ARCH_PPC64)
-#define tcg_qemu_tb_exec(tb_ptr) \
-    ((long REGPARM __attribute__ ((longcall)) (*)(void *))code_gen_prologue)(tb_ptr)
+#define tcg_qemu_tb_exec(env, tb_ptr)                                    \
+    ((long REGPARM __attribute__ ((longcall)) (*)(void *, void *))code_gen_prologue)(env, tb_ptr)
 #else
-#define tcg_qemu_tb_exec(tb_ptr) ((long REGPARM (*)(void *))code_gen_prologue)(tb_ptr)
+#define tcg_qemu_tb_exec(env, tb_ptr)                                    \
+    ((long REGPARM (*)(void *, void *))code_gen_prologue)(env, tb_ptr)
 #endif

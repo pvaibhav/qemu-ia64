@@ -24,6 +24,7 @@
 
 #define CPUState struct CPUM68KState
 
+#include "qemu-common.h"
 #include "cpu-defs.h"
 
 #include "softfloat.h"
@@ -118,7 +119,8 @@ void m68k_tcg_init(void);
 CPUM68KState *cpu_m68k_init(const char *cpu_model);
 int cpu_m68k_exec(CPUM68KState *s);
 void cpu_m68k_close(CPUM68KState *s);
-void do_interrupt(int is_hw);
+void do_interrupt(CPUState *env1);
+void do_interrupt_m68k_hardirq(CPUState *env1);
 /* you can call this signal handler from your SIGBUS and SIGSEGV
    signal handlers to inform the virtual CPU of exceptions. non zero
    is returned if the signal was handled by the virtual CPU.  */
@@ -198,7 +200,7 @@ static inline int m68k_feature(CPUM68KState *env, int feature)
     return (env->features & (1u << feature)) != 0;
 }
 
-void m68k_cpu_list(FILE *f, int (*cpu_fprintf)(FILE *f, const char *fmt, ...));
+void m68k_cpu_list(FILE *f, fprintf_function cpu_fprintf);
 
 void register_m68k_insns (CPUM68KState *env);
 
@@ -209,6 +211,9 @@ void register_m68k_insns (CPUM68KState *env);
 /* Smallest TLB entry size is 1k.  */
 #define TARGET_PAGE_BITS 10
 #endif
+
+#define TARGET_PHYS_ADDR_SPACE_BITS 32
+#define TARGET_VIRT_ADDR_SPACE_BITS 32
 
 #define cpu_init cpu_m68k_init
 #define cpu_exec cpu_m68k_exec
@@ -239,12 +244,6 @@ static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
 #endif
 
 #include "cpu-all.h"
-#include "exec-all.h"
-
-static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
-{
-    env->pc = tb->pc;
-}
 
 static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
                                         target_ulong *cs_base, int *flags)
@@ -254,6 +253,18 @@ static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
     *flags = (env->fpcr & M68K_FPCR_PREC)       /* Bit  6 */
             | (env->sr & SR_S)                  /* Bit  13 */
             | ((env->macsr >> 4) & 0xf);        /* Bits 0-3 */
+}
+
+static inline bool cpu_has_work(CPUState *env)
+{
+    return env->interrupt_request & CPU_INTERRUPT_HARD;
+}
+
+#include "exec-all.h"
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->pc = tb->pc;
 }
 
 #endif

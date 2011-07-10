@@ -68,9 +68,6 @@ static void pic_writel (void *opaque, target_phys_addr_t addr, uint32_t value)
     HeathrowPIC *pic;
     unsigned int n;
 
-#ifdef TARGET_WORDS_BIGENDIAN
-    value = bswap32(value);
-#endif
     n = ((addr & 0xfff) - 0x10) >> 4;
     PIC_DPRINTF("writel: " TARGET_FMT_plx " %u: %08x\n", addr, n, value);
     if (n >= 2)
@@ -120,9 +117,6 @@ static uint32_t pic_readl (void *opaque, target_phys_addr_t addr)
         }
     }
     PIC_DPRINTF("readl: " TARGET_FMT_plx " %u: %08x\n", addr, n, value);
-#ifdef TARGET_WORDS_BIGENDIAN
-    value = bswap32(value);
-#endif
     return value;
 }
 
@@ -165,42 +159,31 @@ static void heathrow_pic_set_irq(void *opaque, int num, int level)
     heathrow_pic_update(s);
 }
 
-static void heathrow_pic_save_one(QEMUFile *f, HeathrowPIC *s)
-{
-    qemu_put_be32s(f, &s->events);
-    qemu_put_be32s(f, &s->mask);
-    qemu_put_be32s(f, &s->levels);
-    qemu_put_be32s(f, &s->level_triggered);
-}
+static const VMStateDescription vmstate_heathrow_pic_one = {
+    .name = "heathrow_pic_one",
+    .version_id = 0,
+    .minimum_version_id = 0,
+    .minimum_version_id_old = 0,
+    .fields      = (VMStateField[]) {
+        VMSTATE_UINT32(events, HeathrowPIC),
+        VMSTATE_UINT32(mask, HeathrowPIC),
+        VMSTATE_UINT32(levels, HeathrowPIC),
+        VMSTATE_UINT32(level_triggered, HeathrowPIC),
+        VMSTATE_END_OF_LIST()
+    }
+};
 
-static void heathrow_pic_save(QEMUFile *f, void *opaque)
-{
-    HeathrowPICS *s = (HeathrowPICS *)opaque;
-
-    heathrow_pic_save_one(f, &s->pics[0]);
-    heathrow_pic_save_one(f, &s->pics[1]);
-}
-
-static void heathrow_pic_load_one(QEMUFile *f, HeathrowPIC *s)
-{
-    qemu_get_be32s(f, &s->events);
-    qemu_get_be32s(f, &s->mask);
-    qemu_get_be32s(f, &s->levels);
-    qemu_get_be32s(f, &s->level_triggered);
-}
-
-static int heathrow_pic_load(QEMUFile *f, void *opaque, int version_id)
-{
-    HeathrowPICS *s = (HeathrowPICS *)opaque;
-
-    if (version_id != 1)
-        return -EINVAL;
-
-    heathrow_pic_load_one(f, &s->pics[0]);
-    heathrow_pic_load_one(f, &s->pics[1]);
-
-    return 0;
-}
+static const VMStateDescription vmstate_heathrow_pic = {
+    .name = "heathrow_pic",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .minimum_version_id_old = 1,
+    .fields      = (VMStateField[]) {
+        VMSTATE_STRUCT_ARRAY(pics, HeathrowPICS, 2, 1,
+                             vmstate_heathrow_pic_one, HeathrowPIC),
+        VMSTATE_END_OF_LIST()
+    }
+};
 
 static void heathrow_pic_reset_one(HeathrowPIC *s)
 {
@@ -226,10 +209,10 @@ qemu_irq *heathrow_pic_init(int *pmem_index,
     s = qemu_mallocz(sizeof(HeathrowPICS));
     /* only 1 CPU */
     s->irqs = irqs[0];
-    *pmem_index = cpu_register_io_memory(pic_read, pic_write, s);
+    *pmem_index = cpu_register_io_memory(pic_read, pic_write, s,
+                                         DEVICE_LITTLE_ENDIAN);
 
-    register_savevm("heathrow_pic", -1, 1, heathrow_pic_save,
-                    heathrow_pic_load, s);
+    vmstate_register(NULL, -1, &vmstate_heathrow_pic, s);
     qemu_register_reset(heathrow_pic_reset, s);
     return qemu_allocate_irqs(heathrow_pic_set_irq, s, 64);
 }

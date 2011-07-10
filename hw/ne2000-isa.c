@@ -68,14 +68,17 @@ static int isa_ne2000_initfn(ISADevice *dev)
 
     register_ioport_write(isa->iobase, 16, 1, ne2000_ioport_write, s);
     register_ioport_read(isa->iobase, 16, 1, ne2000_ioport_read, s);
+    isa_init_ioport_range(dev, isa->iobase, 16);
 
     register_ioport_write(isa->iobase + 0x10, 1, 1, ne2000_asic_ioport_write, s);
     register_ioport_read(isa->iobase + 0x10, 1, 1, ne2000_asic_ioport_read, s);
     register_ioport_write(isa->iobase + 0x10, 2, 2, ne2000_asic_ioport_write, s);
     register_ioport_read(isa->iobase + 0x10, 2, 2, ne2000_asic_ioport_read, s);
+    isa_init_ioport_range(dev, isa->iobase + 0x10, 2);
 
     register_ioport_write(isa->iobase + 0x1f, 1, 1, ne2000_reset_ioport_write, s);
     register_ioport_read(isa->iobase + 0x1f, 1, 1, ne2000_reset_ioport_read, s);
+    isa_init_ioport(dev, isa->iobase + 0x1f);
 
     isa_init_irq(dev, &s->irq, isa->isairq);
 
@@ -87,19 +90,6 @@ static int isa_ne2000_initfn(ISADevice *dev)
     qemu_format_nic_info_str(&s->nic->nc, s->c.macaddr.a);
 
     return 0;
-}
-
-void isa_ne2000_init(int base, int irq, NICInfo *nd)
-{
-    ISADevice *dev;
-
-    qemu_check_nic_model(nd, "ne2k_isa");
-
-    dev = isa_create("ne2k_isa");
-    qdev_prop_set_uint32(&dev->qdev, "iobase", base);
-    qdev_prop_set_uint32(&dev->qdev, "irq",    irq);
-    qdev_set_nic_properties(&dev->qdev, nd);
-    qdev_init_nofail(&dev->qdev);
 }
 
 static ISADeviceInfo ne2000_isa_info = {

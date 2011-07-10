@@ -6,19 +6,10 @@
 #include "qemu-option.h"
 #include "qemu-queue.h"
 #include "qemu-timer.h"
-#include "qdict.h"
-#include "qerror.h"
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
+#include "notify.h"
 
 /* vl.c */
 extern const char *bios_name;
-
-#define QEMU_FILE_TYPE_BIOS   0
-#define QEMU_FILE_TYPE_KEYMAP 1
-char *qemu_find_file(int type, const char *name);
 
 extern int vm_running;
 extern const char *qemu_name;
@@ -33,68 +24,58 @@ VMChangeStateEntry *qemu_add_vm_change_state_handler(VMChangeStateHandler *cb,
                                                      void *opaque);
 void qemu_del_vm_change_state_handler(VMChangeStateEntry *e);
 
+#define VMSTOP_USER      0
+#define VMSTOP_DEBUG     1
+#define VMSTOP_SHUTDOWN  2
+#define VMSTOP_DISKFULL  3
+#define VMSTOP_WATCHDOG  4
+#define VMSTOP_PANIC     5
+#define VMSTOP_SAVEVM    6
+#define VMSTOP_LOADVM    7
+#define VMSTOP_MIGRATE   8
+
+#define VMRESET_SILENT   false
+#define VMRESET_REPORT   true
+
 void vm_start(void);
 void vm_stop(int reason);
-
-uint64_t ram_bytes_remaining(void);
-uint64_t ram_bytes_transferred(void);
-uint64_t ram_bytes_total(void);
-
-int64_t cpu_get_ticks(void);
-void cpu_enable_ticks(void);
-void cpu_disable_ticks(void);
 
 void qemu_system_reset_request(void);
 void qemu_system_shutdown_request(void);
 void qemu_system_powerdown_request(void);
+void qemu_system_debug_request(void);
+void qemu_system_vmstop_request(int reason);
+int qemu_shutdown_requested_get(void);
+int qemu_reset_requested_get(void);
 int qemu_shutdown_requested(void);
 int qemu_reset_requested(void);
 int qemu_powerdown_requested(void);
+void qemu_system_killed(int signal, pid_t pid);
+void qemu_kill_report(void);
 extern qemu_irq qemu_system_powerdown;
-void qemu_system_reset(void);
+void qemu_system_reset(bool report);
+
+void qemu_add_exit_notifier(Notifier *notify);
+void qemu_remove_exit_notifier(Notifier *notify);
+
+void qemu_add_machine_init_done_notifier(Notifier *notify);
 
 void do_savevm(Monitor *mon, const QDict *qdict);
-int load_vmstate(Monitor *mon, const char *name);
+int load_vmstate(const char *name);
 void do_delvm(Monitor *mon, const QDict *qdict);
 void do_info_snapshots(Monitor *mon);
 
 void qemu_announce_self(void);
 
-void main_loop_wait(int timeout);
+void main_loop_wait(int nonblocking);
 
+bool qemu_savevm_state_blocked(Monitor *mon);
 int qemu_savevm_state_begin(Monitor *mon, QEMUFile *f, int blk_enable,
                             int shared);
 int qemu_savevm_state_iterate(Monitor *mon, QEMUFile *f);
 int qemu_savevm_state_complete(Monitor *mon, QEMUFile *f);
 void qemu_savevm_state_cancel(Monitor *mon, QEMUFile *f);
 int qemu_loadvm_state(QEMUFile *f);
-
-void qemu_errors_to_file(FILE *fp);
-void qemu_errors_to_mon(Monitor *mon);
-void qemu_errors_to_previous(void);
-void qemu_error(const char *fmt, ...) __attribute__ ((format(printf, 1, 2)));
-void qemu_error_internal(const char *file, int linenr, const char *func,
-                         const char *fmt, ...)
-                         __attribute__ ((format(printf, 4, 5)));
-
-#define qemu_error_new(fmt, ...) \
-    qemu_error_internal(__FILE__, __LINE__, __func__, fmt, ## __VA_ARGS__)
-
-#ifdef _WIN32
-/* Polling handling */
-
-/* return TRUE if no sleep should be done afterwards */
-typedef int PollingFunc(void *opaque);
-
-int qemu_add_polling_cb(PollingFunc *func, void *opaque);
-void qemu_del_polling_cb(PollingFunc *func, void *opaque);
-
-/* Wait objects handling */
-typedef void WaitObjectFunc(void *opaque);
-
-int qemu_add_wait_object(HANDLE handle, WaitObjectFunc *func, void *opaque);
-void qemu_del_wait_object(HANDLE handle, WaitObjectFunc *func, void *opaque);
-#endif
 
 /* SLIRP */
 void do_info_slirp(Monitor *mon);
@@ -104,15 +85,15 @@ typedef enum DisplayType
     DT_DEFAULT,
     DT_CURSES,
     DT_SDL,
-    DT_VNC,
     DT_NOGRAPHIC,
+    DT_NONE,
 } DisplayType;
 
 extern int autostart;
 extern int bios_size;
 
 typedef enum {
-    VGA_NONE, VGA_STD, VGA_CIRRUS, VGA_VMWARE, VGA_XENFB
+    VGA_NONE, VGA_STD, VGA_CIRRUS, VGA_VMWARE, VGA_XENFB, VGA_QXL,
 } VGAInterfaceType;
 
 extern int vga_interface_type;
@@ -120,6 +101,7 @@ extern int vga_interface_type;
 #define std_vga_enabled (vga_interface_type == VGA_STD)
 #define xenfb_enabled (vga_interface_type == VGA_XENFB)
 #define vmsvga_enabled (vga_interface_type == VGA_VMWARE)
+#define qxl_enabled (vga_interface_type == VGA_QXL)
 
 extern int graphic_width;
 extern int graphic_height;
@@ -137,6 +119,7 @@ extern int max_cpus;
 extern int cursor_hide;
 extern int graphic_rotate;
 extern int no_quit;
+extern int no_shutdown;
 extern int semihosting_enabled;
 extern int old_param;
 extern int boot_menu;
@@ -148,75 +131,26 @@ extern uint64_t node_mem[MAX_NODES];
 extern uint64_t node_cpumask[MAX_NODES];
 
 #define MAX_OPTION_ROMS 16
-extern const char *option_rom[MAX_OPTION_ROMS];
+typedef struct QEMUOptionRom {
+    const char *name;
+    int32_t bootindex;
+} QEMUOptionRom;
+extern QEMUOptionRom option_rom[MAX_OPTION_ROMS];
 extern int nb_option_roms;
 
-#ifdef NEED_CPU_H
-#if defined(TARGET_SPARC) || defined(TARGET_PPC)
 #define MAX_PROM_ENVS 128
 extern const char *prom_envs[MAX_PROM_ENVS];
 extern unsigned int nb_prom_envs;
-#endif
-#endif
-
-typedef enum {
-    IF_NONE,
-    IF_IDE, IF_SCSI, IF_FLOPPY, IF_PFLASH, IF_MTD, IF_SD, IF_VIRTIO, IF_XEN,
-    IF_COUNT
-} BlockInterfaceType;
-
-typedef enum {
-    BLOCK_ERR_REPORT, BLOCK_ERR_IGNORE, BLOCK_ERR_STOP_ENOSPC,
-    BLOCK_ERR_STOP_ANY
-} BlockInterfaceErrorAction;
-
-#define BLOCK_SERIAL_STRLEN 20
-
-typedef struct DriveInfo {
-    BlockDriverState *bdrv;
-    char *id;
-    const char *devaddr;
-    BlockInterfaceType type;
-    int bus;
-    int unit;
-    QemuOpts *opts;
-    BlockInterfaceErrorAction on_read_error;
-    BlockInterfaceErrorAction on_write_error;
-    char serial[BLOCK_SERIAL_STRLEN + 1];
-    QTAILQ_ENTRY(DriveInfo) next;
-} DriveInfo;
-
-#define MAX_IDE_DEVS	2
-#define MAX_SCSI_DEVS	7
-#define MAX_DRIVES 32
-
-extern QTAILQ_HEAD(drivelist, DriveInfo) drives;
-extern QTAILQ_HEAD(driveoptlist, DriveOpt) driveopts;
-
-extern DriveInfo *drive_get(BlockInterfaceType type, int bus, int unit);
-extern DriveInfo *drive_get_by_id(const char *id);
-extern int drive_get_max_bus(BlockInterfaceType type);
-extern void drive_uninit(DriveInfo *dinfo);
-extern const char *drive_get_serial(BlockDriverState *bdrv);
-
-extern BlockInterfaceErrorAction drive_get_on_error(
-    BlockDriverState *bdrv, int is_read);
-
-BlockDriverState *qdev_init_bdrv(DeviceState *dev, BlockInterfaceType type);
-
-extern QemuOpts *drive_add(const char *file, const char *fmt, ...);
-extern DriveInfo *drive_init(QemuOpts *arg, void *machine, int *fatal_error);
-
-/* device-hotplug */
-
-DriveInfo *add_init_drive(const char *opts);
 
 /* pci-hotplug */
 void pci_device_hot_add(Monitor *mon, const QDict *qdict);
 void drive_hot_add(Monitor *mon, const QDict *qdict);
-void pci_device_hot_remove(Monitor *mon, const char *pci_addr);
-void do_pci_device_hot_remove(Monitor *mon, const QDict *qdict,
-                              QObject **ret_data);
+void do_pci_device_hot_remove(Monitor *mon, const QDict *qdict);
+
+/* pcie aer error injection */
+void pcie_aer_inject_error_print(Monitor *mon, const QObject *data);
+int do_pcie_aer_inejct_error(Monitor *mon,
+                             const QDict *qdict, QObject **ret_data);
 
 /* serial ports */
 
@@ -230,33 +164,15 @@ extern CharDriverState *serial_hds[MAX_SERIAL_PORTS];
 
 extern CharDriverState *parallel_hds[MAX_PARALLEL_PORTS];
 
-/* virtio consoles */
-
-#define MAX_VIRTIO_CONSOLES 1
-
-extern CharDriverState *virtcon_hds[MAX_VIRTIO_CONSOLES];
-
-#define TFR(expr) do { if ((expr) != -1) break; } while (errno == EINTR)
-
-#ifdef HAS_AUDIO
-struct soundhw {
-    const char *name;
-    const char *descr;
-    int enabled;
-    int isa;
-    union {
-        int (*init_isa) (qemu_irq *pic);
-        int (*init_pci) (PCIBus *bus);
-    } init;
-};
-
-extern struct soundhw soundhw[];
-#endif
-
 void do_usb_add(Monitor *mon, const QDict *qdict);
 void do_usb_del(Monitor *mon, const QDict *qdict);
 void usb_info(Monitor *mon);
 
+void rtc_change_mon_event(struct tm *tm);
+
 void register_devices(void);
 
+void add_boot_device_path(int32_t bootindex, DeviceState *dev,
+                          const char *suffix);
+char *get_boot_devices_list(uint32_t *size);
 #endif

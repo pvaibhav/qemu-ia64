@@ -23,7 +23,6 @@
 
 #include "config.h"
 #include "cpu.h"
-#include "exec-all.h"
 #include "host-utils.h"
 
 #define D(x)
@@ -43,11 +42,6 @@ int cpu_mb_handle_mmu_fault(CPUState * env, target_ulong address, int rw,
     env->exception_index = 0xaa;
     cpu_dump_state(env, stderr, fprintf, 0);
     return 1;
-}
-
-target_phys_addr_t cpu_get_phys_page_debug(CPUState * env, target_ulong addr)
-{
-    return addr;
 }
 
 #else /* !CONFIG_USER_ONLY */
@@ -81,8 +75,8 @@ int cpu_mb_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
 
             DMMU(qemu_log("MMU map mmu=%d v=%x p=%x prot=%x\n",
                      mmu_idx, vaddr, paddr, lu.prot));
-            r = tlb_set_page(env, vaddr,
-                             paddr, lu.prot, mmu_idx, is_softmmu);
+            tlb_set_page(env, vaddr, paddr, lu.prot, mmu_idx, TARGET_PAGE_SIZE);
+            r = 0;
         } else {
             env->sregs[SR_EAR] = address;
             DMMU(qemu_log("mmu=%d miss v=%x\n", mmu_idx, address));
@@ -112,7 +106,8 @@ int cpu_mb_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
         /* MMU disabled or not available.  */
         address &= TARGET_PAGE_MASK;
         prot = PAGE_BITS;
-        r = tlb_set_page(env, address, address, prot, mmu_idx, is_softmmu);
+        tlb_set_page(env, address, address, prot, mmu_idx, TARGET_PAGE_SIZE);
+        r = 0;
     }
     return r;
 }
@@ -121,7 +116,7 @@ void do_interrupt(CPUState *env)
 {
     uint32_t t;
 
-    /* IMM flag cannot propagate accross a branch and into the dslot.  */
+    /* IMM flag cannot propagate across a branch and into the dslot.  */
     assert(!((env->iflags & D_FLAG) && (env->iflags & IMM_FLAG)));
     assert(!(env->iflags & (DRTI_FLAG | DRTE_FLAG | DRTB_FLAG)));
 /*    assert(env->sregs[SR_MSR] & (MSR_EE)); Only for HW exceptions.  */

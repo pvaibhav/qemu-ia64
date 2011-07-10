@@ -31,7 +31,6 @@
 #include "qemu-char.h"
 #include "qemu-common.h"
 #include "qemu-option.h"
-#include "sysemu.h"
 
 typedef struct VDEState {
     VLANClientState nc;
@@ -125,10 +124,6 @@ int net_init_vde(QemuOpts *opts, Monitor *mon, const char *name, VLANState *vlan
 
     if (net_vde_init(vlan, "vde", name, sock, port, group, mode) == -1) {
         return -1;
-    }
-
-    if (vlan) {
-        vlan->nb_host_devs++;
     }
 
     return 0;

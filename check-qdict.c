@@ -5,6 +5,9 @@
  *
  * Authors:
  *  Luiz Capitulino <lcapitulino@redhat.com>
+ *
+ * This work is licensed under the terms of the GNU LGPL, version 2.1 or later.
+ * See the COPYING.LIB file in the top-level directory.
  */
 #include <check.h>
 
@@ -47,7 +50,7 @@ START_TEST(qdict_put_obj_test)
     qdict_put_obj(qdict, "", QOBJECT(qint_from_int(num)));
 
     fail_unless(qdict_size(qdict) == 1);
-    ent = QLIST_FIRST(&qdict->table[12345 % QDICT_HASH_SIZE]);
+    ent = QLIST_FIRST(&qdict->table[12345 % QDICT_BUCKET_MAX]);
     qi = qobject_to_qint(ent->value);
     fail_unless(qint_get_int(qi) == num);
 
@@ -191,6 +194,36 @@ START_TEST(qobject_to_qdict_test)
 }
 END_TEST
 
+START_TEST(qdict_iterapi_test)
+{
+    int count;
+    const QDictEntry *ent;
+
+    fail_unless(qdict_first(tests_dict) == NULL);
+
+    qdict_put(tests_dict, "key1", qint_from_int(1));
+    qdict_put(tests_dict, "key2", qint_from_int(2));
+    qdict_put(tests_dict, "key3", qint_from_int(3));
+
+    count = 0;
+    for (ent = qdict_first(tests_dict); ent; ent = qdict_next(tests_dict, ent)){
+        fail_unless(qdict_haskey(tests_dict, qdict_entry_key(ent)) == 1);
+        count++;
+    }
+
+    fail_unless(count == qdict_size(tests_dict));
+
+    /* Do it again to test restarting */
+    count = 0;
+    for (ent = qdict_first(tests_dict); ent; ent = qdict_next(tests_dict, ent)){
+        fail_unless(qdict_haskey(tests_dict, qdict_entry_key(ent)) == 1);
+        count++;
+    }
+
+    fail_unless(count == qdict_size(tests_dict));
+}
+END_TEST
+
 /*
  * Errors test-cases
  */
@@ -205,6 +238,8 @@ START_TEST(qdict_put_exists_test)
 
     value = qdict_get_int(tests_dict, key);
     fail_unless(value == 2);
+
+    fail_unless(qdict_size(tests_dict) == 1);
 }
 END_TEST
 
@@ -232,8 +267,9 @@ static QString *read_line(FILE *file, char *key)
 {
     char value[128];
 
-    if (fscanf(file, "%s%s", key, value) == EOF)
+    if (fscanf(file, "%127s%127s", key, value) == EOF) {
         return NULL;
+    }
     remove_dots(key);
     return qstring_from_str(value);
 }
@@ -333,6 +369,7 @@ static Suite *qdict_suite(void)
     tcase_add_test(qdict_public2_tcase, qdict_haskey_test);
     tcase_add_test(qdict_public2_tcase, qdict_del_test);
     tcase_add_test(qdict_public2_tcase, qobject_to_qdict_test);
+    tcase_add_test(qdict_public2_tcase, qdict_iterapi_test);
 
     qdict_errors_tcase = tcase_create("Errors");
     suite_add_tcase(s, qdict_errors_tcase);
