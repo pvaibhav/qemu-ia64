@@ -1336,7 +1336,15 @@ static void probe_guest_base(const char *image_name,
         /* Round addresses to page boundaries.  */
         loaddr &= qemu_host_page_mask;
         hiaddr = HOST_PAGE_ALIGN(hiaddr);
-
+#ifdef TARGET_IA64
+        /*  pvaibhav:
+         For IA64 target, the loaddr is large (0x4000000000000000),
+         so we need to wrap back to a smaller memory address.
+         Hence just set it to mmap_min_addr. The offset will then be large
+         enough that host_start will wrap back.
+         */
+        host_start = HOST_PAGE_ALIGN(mmap_min_addr);
+#else
         if (loaddr < mmap_min_addr) {
             host_start = HOST_PAGE_ALIGN(mmap_min_addr);
         } else {
@@ -1346,6 +1354,7 @@ static void probe_guest_base(const char *image_name,
                 goto exit_errmsg;
             }
         }
+#endif /* TARGET_IA64 */
         host_size = hiaddr - loaddr;
         while (1) {
             /* Do not use mmap_find_vma here because that is limited to the
@@ -1377,7 +1386,7 @@ static void probe_guest_base(const char *image_name,
                 goto exit_errmsg;
             }
         }
-        qemu_log("Relocating guest address space from 0x"
+        printf("Relocating guest address space from 0x"
                  TARGET_ABI_FMT_lx " to 0x%lx\n",
                  loaddr, real_start);
         guest_base = real_start - loaddr;
