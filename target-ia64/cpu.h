@@ -93,10 +93,10 @@ int cpu_ia64_handle_mmu_fault (CPUIA64State *env, target_ulong address, int rw,
 
 #include "exec-all.h"
 
-#define EXCP_OPEX 1 /* operation exception (sigill) */
-#define EXCP_SVC 2 /* supervisor call (syscall) */
-#define EXCP_ADDR 5 /* addressing exception */
-#define EXCP_EXECUTE_SVC 0xff00000 /* supervisor call via execute insn */
+enum {
+    EXCP_SYSCALL_BREAK, /* syscall via break.m 0x10000  */
+    EXCP_MMFAULT
+};
 
 static inline int cpu_has_work(CPUState *env)
 {
