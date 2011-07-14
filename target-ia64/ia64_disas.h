@@ -33,8 +33,6 @@
 #define	IA64_ADDITIONAL_OPCODES		IA64_OP_NUMBER_OF_OPCODES
 #endif
 
-typedef unsigned long long uint64_t;
-
 /* Application registers. */
 #define	AR_K0		0
 #define	AR_K1		1

@@ -24,6 +24,7 @@
 #include "disas.h"
 #include "tcg-op.h"
 #include "qemu-log.h"
+#include "ia64_disas.h"
 
 void cpu_dump_state(CPUState *env, FILE *f,
                     int (*cpu_fprintf)(FILE *f, const char *fmt, ...),
