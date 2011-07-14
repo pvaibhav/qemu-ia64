@@ -49,15 +49,17 @@ typedef struct CPUIA64State {
     
     uint64_t    br[8];      // branch registers br0 - br7
     uint64_t    ar[128];    // application registers ar0 - ar127
+#define ar_pfs  64
+    
     uint64_t    ip;         // instruction pointer (PC)
     struct {                // current frame marker (has various fields)
-        uint8_t sof;
-        uint8_t sol;
-        uint8_t sor;
+        uint32_t sof;
+        uint32_t sol;
+        uint32_t sor;
         struct {
-            uint8_t gr;
-            uint8_t fr;
-            uint8_t pr;
+            uint32_t gr;
+            uint32_t fr;
+            uint32_t pr;
         } rrb;
     } cfm;
 
@@ -76,6 +78,7 @@ static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
 CPUIA64State *cpu_ia64_init(const char *cpu_model);
 int cpu_ia64_exec(CPUIA64State *s);
 void cpu_ia64_close(CPUIA64State *s);
+void cpu_ia64_tcg_init(void);
 
 /* you can call this signal handler from your SIGBUS and SIGSEGV
    signal handlers to inform the virtual CPU of exceptions. non zero
