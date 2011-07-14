@@ -136,21 +136,34 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
         for (slot = 0; slot < 3; slot++) {
             insn = &bundle.b_inst[slot];
             // FIXME: predicate is ignored
+            printf("[%d]\t", slot);
             switch (insn->i_op) {
                 case IA64_OP_ALLOC:
+                    printf("alloc\n");
                     gen_op_alloc(insn->i_oper[1].o_value, /* r# */
                                  insn->i_oper[3].o_value, /* i */
                                  insn->i_oper[4].o_value, /* l */
                                  insn->i_oper[5].o_value, /* o */
                                  insn->i_oper[6].o_value  /* r */);
                     break;
+                case IA64_OP_ADD:
+                case IA64_OP_ADDS:
+                case IA64_OP_ADDL:
+                case IA64_OP_ADDP4:
+                    printf("adds (%d)\n", insn->i_op);
+                    break;
+                case IA64_OP_NOP:
+                    printf("nop\n");
+                    break;
                 case IA64_OP_MOV:
                 case IA64_OP_MOVL:
-                    printf("MOV opcode %d\n", insn->i_op);
+                    printf("mov (%d)\n", insn->i_op);
+                    break;
+                case IA64_OP_BREAK:
+                    printf("break\n");
                     break;
                 default:
-                    printf("\nUnhandled opcode %d in slot [%d]",
-                           insn->i_op, slot);
+                    printf("Unhandled opcode %d\n", insn->i_op);
                     break;
             };
         }
