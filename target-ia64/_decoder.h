@@ -22,8 +22,8 @@
 #ifndef _SKI__DECODER_H
 #define _SKI__DECODER_H
 
-#include <decoder.h>
-#include <EMInst.h>
+#include "decoder.h"
+#include "EMInst.h"
 
 /* len must be > 0 */
 #define extract(slot, pos, len) \
@@ -97,7 +97,12 @@ extern TemplateInfo templates[NUM_TEMPL_SBS];
 #include <machine/inline.h>
 #endif /* INLINE */
 
-# include "std.h"
+//# include "std.h"
+
+// pvaibhav: XXX: below 3 lines are in replacement of std.h
+#define LITTLE_ENDIAN 1234
+#define BIG_ENDIAN 4321
+#define BYTE_ORDER LITTLE_ENDIAN
 
 #if !BYTE_ORDER || !BIG_ENDIAN || !LITTLE_ENDIAN
 # error "Endianness is unknown!"

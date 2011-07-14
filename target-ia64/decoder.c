@@ -22,7 +22,7 @@
 
 
 #include <string.h> /* for memcmp */
-#include <_decoder.h>
+#include "_decoder.h"
 
 #define sign_ext(i, n)	((((long long)(i) << (64 - (n)))) >> (64 - (n)))
 
@@ -65,11 +65,11 @@ InstID instr_decode(const Unit unit, const unsigned long long slot,
 	op = &majorOps[unit][MAJOR_OP(slot)];
 
 	while (!INSTR_DECODED(op)) {
-	    ext = (slot << op->ext[0].left) >> op->ext[0].right;
+	    ext = (unsigned) (slot << op->ext[0].left) >> op->ext[0].right;
 	    for (n = 1; (n < NUM_EXTS_PER_LEVEL &&
 			 op->ext[n].left != NO_EXTENSION); n++)
-		ext = ext << (64 - op->ext[n].right) |
-		    (slot << op->ext[n].left) >> op->ext[n].right;
+		ext = (unsigned) (ext << (64 - op->ext[n].right) |
+		    (slot << op->ext[n].left) >> op->ext[n].right);
 
 	    op = &opDecodeTable[op->u.opIndex + ext];
 	}
@@ -257,10 +257,10 @@ InstID instr_decode(const Unit unit, const unsigned long long slot,
 		    adv = 0;
 		    break;
 		case 3:				/* "l" = sol */
-		    sol = op_bits;		/* record sol */
+		    sol = (unsigned) op_bits;		/* record sol */
 		    break;
 		case 4:				/* "o" = sof - sol */
-		    sof = op_bits;		/* record sof */
+		    sof = (unsigned) op_bits;		/* record sof */
 		    op_bits = sof - sol;
 		    break;
 		}
@@ -277,7 +277,7 @@ InstID instr_decode(const Unit unit, const unsigned long long slot,
 		    opnds->flags |= EM_FLAG_BAD_MBTYPE;
 		break;
 	    default:
-#ifdef DEBUG
+#if 0
 		fprintf(stderr, "unknown OPTYPE: %u\n", inst_info->op[o]);
 #endif /* DEBUG */
 		break;
