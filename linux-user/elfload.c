@@ -895,7 +895,7 @@ static inline void init_thread(struct target_pt_regs *regs, struct image_info *i
 
 static inline void init_thread(struct target_pt_regs *regs, struct image_info *infop)
 {
-    // TODO
+    regs->pc = infop->entry;
 }
 
 #endif /* TARGET_IA64 */

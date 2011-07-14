@@ -43,12 +43,16 @@ void cpu_dump_state(CPUState *env, FILE *f,
 
 void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
 {
+    printf("gen_intermediate_code called, pc=%lu, size=%u, flags=0x%lx\n", tb->pc, tb->size, (unsigned long)tb->flags);
+    printf("One byte there: %x\n", ldub_code(env->ip));
 }
 
 void gen_intermediate_code_pc (CPUState *env, struct TranslationBlock *tb)
 {
+    printf("gen_intermediate_code_pc called\n");
 }
 
 void restore_state_to_opc(CPUState *env, TranslationBlock *tb, int pc_pos)
 {
+    printf("restore_state_to_opc called\n");
 }

@@ -3543,7 +3543,7 @@ int main(int argc, char **argv, char **envp)
     }
 #elif defined(TARGET_IA64)
     {
-        // Nothing special TODO
+        env->ip = regs->pc;
     }
 #else
 #error unsupported target CPU
