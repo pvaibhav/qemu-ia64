@@ -5242,9 +5242,28 @@ void cpu_dump_state(CPUState *env, FILE *f,
 void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
 {
     printf("gen_intermediate_code called, pc=%lu, size=%u, flags=0x%lx\n", tb->pc, tb->size, (unsigned long)tb->flags);
-    void* ip = g2h(env->ip);
-    struct ia64_bundle b;
-    ia64_decode(ip, &b);
+    
+    void* ip = g2h(env->ip); // get pointer to the entry point
+    
+    struct ia64_bundle bundle;
+    struct ia64_inst* insn;
+    int slot;
+    
+    for (;;) {
+        ia64_decode(ip, &bundle);
+        if (bundle.b_templ == 0 /* invalid insn */) {
+            break;
+        }
+        env->ip += 16; // update PC (each bundle is 16 bytes in length)
+        for (slot = 0; slot < 3; slot++) {
+            insn = &bundle.b_inst[slot];
+            switch (insn->i_op) {
+                default:
+                    printf("Unhandled opcode %d in slot [%d]\n",
+                           insn->i_op, slot);
+            };
+        }
+    }
 }
 
 void gen_intermediate_code_pc (CPUState *env, struct TranslationBlock *tb)
