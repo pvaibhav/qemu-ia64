@@ -27,6 +27,7 @@
 #include "ia64_disas.h"
 
 /* TCG globals to map to cpu registers and other state */
+static TCGv_ptr reg_env;        // CPUState struct pointer
 static TCGv_i64 reg_gr[128];    // general registers
 static TCGv_i64 reg_ip;         // instruction pointer
 static TCGv_i64 reg_ar_pfs;     // application register ar.pfs
@@ -56,10 +57,11 @@ static const char* reg_name_r[] = {
 void cpu_ia64_tcg_init(void) {
     int r;
     
+    reg_env = tcg_global_reg_new_ptr(TCG_AREG0, "env");
+    
     reg_ip = tcg_global_mem_new_i64(TCG_AREG0, offsetof(CPUState, ip), "ip");
 
-    reg_gr[0] = tcg_const_i64(0); /* XXX: need to make a global? */
-    for (r = 1; r < 128; r++) {
+    for (r = 0; r < 128; r++) {
         reg_gr[r] = tcg_global_mem_new_i64(TCG_AREG0, offsetof(CPUState, gr[r]),
                                        reg_name_r[r]);
     }
@@ -107,7 +109,7 @@ static void gen_op_alloc(const uint8_t gr, const uint8_t i, const uint8_t l,
         tcg_gen_movi_i32(reg_sol, i + l);
         tcg_gen_movi_i32(reg_sof, i + l + o);
         tcg_gen_movi_i32(reg_sor, r);
-        tcg_gen_mov_i32(reg_gr[gr], reg_ar_pfs); // XXX: check 'gr'
+        tcg_gen_mov_i64(reg_gr[gr], reg_ar_pfs); // XXX: check 'gr'
     }
 }
 
@@ -125,19 +127,21 @@ static void gen_op_mov_rb(const uint8_t dest, const uint8_t source)
     tcg_gen_mov_i64(reg_gr[dest], reg_gr[source]);
 }
 
-static void gen_op_mov_r_ip(const uint8_t dest)
+static void gen_op_mov_r_ip(const uint8_t dest, void* ip)
 {
     /* mov r[dest] = ip */
     printf("r%d = ip", dest);
+    tcg_gen_movi_i64(reg_ip, (uint64_t) ip);
     tcg_gen_mov_i64(reg_gr[dest], reg_ip);
 }
 
 void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
 {
-    printf("gen_intermediate_code pc=%lu, size=%u, flags=0x%lx, end=%lu\n",
-           tb->pc, tb->size, (unsigned long)tb->flags, (unsigned long)g2h(env->code_ends_at));
+    printf("gen_intermediate_code pc=0x%lx, size=%u, flags=0x%lx, end=0x%lx\n",
+           tb->pc, tb->size, (unsigned long)tb->flags, env->code_ends_at);
     
     void* ip = g2h(env->ip); // get pointer to the entry point
+    void* endpoint = g2h(env->code_ends_at);
     
     struct ia64_bundle bundle;
     struct ia64_inst* insn;
@@ -205,7 +209,7 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
                                           insn->i_oper[2].o_value);
                             break;
                         case IA64_OPER_IP:
-                            gen_op_mov_r_ip(insn->i_oper[1].o_value);
+                            gen_op_mov_r_ip(insn->i_oper[1].o_value, ip);
                             break;
                         default:
                             printf("Unhandled MOV (source oper type %d)\n",
@@ -222,12 +226,15 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
             };
         } /* slot */
         ip += 16; // update PC (each bundle is 16 bytes in length)
-        if (ip >= g2h(env->code_ends_at)) {
+        if (ip+16 > endpoint) {
             printf("\n\tCODE ENDS!\n");
+            tcg_gen_movi_i64(reg_ip, (uint64_t) ip);
+            tcg_gen_exit_tb(0);
             break;
+        } else {
+            printf("Current IP: 0x%lx\n", (unsigned long)ip);
         }
     } /* bundle */
-    env->ip = h2g(ip);
 }
 
 void gen_intermediate_code_pc (CPUState *env, struct TranslationBlock *tb)
