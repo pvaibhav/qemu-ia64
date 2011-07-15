@@ -25,6 +25,9 @@
 #include "tcg-op.h"
 #include "qemu-log.h"
 #include "ia64_disas.h"
+#include "helpers.h"
+#define GEN_HELPER 1
+#include "helpers.h"
 
 /* TCG globals to map to cpu registers and other state */
 static TCGv_ptr reg_env;        // CPUState struct pointer
@@ -103,7 +106,14 @@ static inline void gen_save_ip(void* ip_in_host) {
     tcg_gen_movi_i64(reg_ip, h2g((uint64_t) ip_in_host));
 }
 
-static void gen_op_alloc(const uint8_t gr, const uint8_t i, const uint8_t l,
+static inline void gen_exception(unsigned int excp) {
+    TCGv_i32 tmp = tcg_temp_new_i32();
+    tcg_gen_movi_i32(tmp, excp);
+    gen_helper_exception(tmp);
+    tcg_temp_free_i32(tmp);
+}
+
+static inline void gen_op_alloc(const uint8_t gr, const uint8_t i, const uint8_t l,
                   const uint8_t o, const uint8_t r)
 {
     /* alloc r[gr] = ar.pfs, i, l, o, r */
@@ -117,21 +127,21 @@ static void gen_op_alloc(const uint8_t gr, const uint8_t i, const uint8_t l,
     }
 }
 
-static void gen_op_mov_rr(const uint8_t dest, const uint8_t source)
+static inline void gen_op_mov_rr(const uint8_t dest, const uint8_t source)
 {
     /* mov r[dest] = r[source] */
     printf("r%d = r%d", dest, source);
     tcg_gen_mov_i64(reg_gr[dest], reg_gr[source]);
 }
 
-static void gen_op_mov_rb(const uint8_t dest, const uint8_t source)
+static inline void gen_op_mov_rb(const uint8_t dest, const uint8_t source)
 {
     /* mov r[dest] = b[source] */
     printf("r%d = b%d", dest, source);
     tcg_gen_mov_i64(reg_gr[dest], reg_gr[source]);
 }
 
-static void gen_op_mov_r_ip(const uint8_t dest, void* ip)
+static inline void gen_op_mov_r_ip(const uint8_t dest, void* ip)
 {
     /* mov r[dest] = ip */
     printf("r%d = ip", dest);
@@ -222,7 +232,10 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
                     printf("\n");
                     break;
                 case IA64_OP_BREAK:
+                    // FIXME: put the proper arguments in proper places first
+                    gen_exception(EXCP_SYSCALL_BREAK);
                     printf("break\n");
+                    goto done_with_tb;
                     break;
                 default:
                     printf("Unhandled opcode %d\n", insn->i_op);
@@ -232,13 +245,15 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
         ip += 16; // update PC (each bundle is 16 bytes in length)
         if (ip+16 > endpoint) {
             printf("\n\tCODE ENDS!\n");
-            gen_save_ip(ip);
-            tcg_gen_exit_tb(0);
+            goto done_with_tb;
             break;
         } else {
             printf("Current IP: 0x%lx\n", (unsigned long)ip);
         }
     } /* bundle */
+done_with_tb:
+    gen_save_ip(ip);
+    tcg_gen_exit_tb(0);
 }
 
 void gen_intermediate_code_pc (CPUState *env, struct TranslationBlock *tb)
