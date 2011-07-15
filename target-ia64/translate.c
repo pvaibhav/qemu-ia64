@@ -109,7 +109,7 @@ static inline void gen_save_ip(void* ip_in_host) {
 static inline void gen_exception(unsigned int excp) {
     TCGv_i32 tmp = tcg_temp_new_i32();
     tcg_gen_movi_i32(tmp, excp);
-    gen_helper_exception(tmp);
+    //gen_helper_exception(tmp);
     tcg_temp_free_i32(tmp);
 }
 
@@ -253,6 +253,8 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
     } /* bundle */
 done_with_tb:
     gen_save_ip(ip);
+    tb->size = (unsigned long) ip - (tb->pc);
+    printf("Exiting TB with size=0x%x\n", tb->size);
     tcg_gen_exit_tb(0);
 }
 
