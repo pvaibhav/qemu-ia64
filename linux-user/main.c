@@ -3544,6 +3544,7 @@ int main(int argc, char **argv, char **envp)
 #elif defined(TARGET_IA64)
     {
         env->ip = regs->pc;
+        env->code_ends_at = regs->code_ends_at;
     }
 #else
 #error unsupported target CPU

@@ -65,3 +65,4 @@ int cpu_ia64_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
     env->exception_index = EXCP_MMFAULT;
     return 1;
 }
+

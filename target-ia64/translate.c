@@ -104,35 +104,50 @@ static void gen_op_alloc(const uint8_t gr, const uint8_t i, const uint8_t l,
     if ((i + l + o) > 96 || r > (i + l)) {
         // TODO: raise illegal operation
     } else {
-        tcg_gen_movi_tl(reg_sol, i + l);
-        tcg_gen_movi_tl(reg_sof, i + l + o);
-        tcg_gen_movi_tl(reg_sor, r);
-        tcg_gen_mov_tl(reg_gr[gr], reg_ar_pfs); // XXX: check 'gr'
+        tcg_gen_movi_i32(reg_sol, i + l);
+        tcg_gen_movi_i32(reg_sof, i + l + o);
+        tcg_gen_movi_i32(reg_sor, r);
+        tcg_gen_mov_i32(reg_gr[gr], reg_ar_pfs); // XXX: check 'gr'
     }
 }
-#if 0
+
 static void gen_op_mov_rr(const uint8_t dest, const uint8_t source)
 {
     /* mov r[dest] = r[source] */
-    tcg_gen_mov_tl(reg_gr[dest], reg_gr[source]);
+    printf("r%d = r%d", dest, source);
+    tcg_gen_mov_i64(reg_gr[dest], reg_gr[source]);
 }
-#endif
+
+static void gen_op_mov_rb(const uint8_t dest, const uint8_t source)
+{
+    /* mov r[dest] = b[source] */
+    printf("r%d = b%d", dest, source);
+    tcg_gen_mov_i64(reg_gr[dest], reg_gr[source]);
+}
+
+static void gen_op_mov_r_ip(const uint8_t dest)
+{
+    /* mov r[dest] = ip */
+    printf("r%d = ip", dest);
+    tcg_gen_mov_i64(reg_gr[dest], reg_ip);
+}
+
 void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
 {
-    printf("gen_intermediate_code called, pc=%lu, size=%u, flags=0x%lx\n", tb->pc, tb->size, (unsigned long)tb->flags);
+    printf("gen_intermediate_code pc=%lu, size=%u, flags=0x%lx, end=%lu\n",
+           tb->pc, tb->size, (unsigned long)tb->flags, (unsigned long)g2h(env->code_ends_at));
     
     void* ip = g2h(env->ip); // get pointer to the entry point
     
     struct ia64_bundle bundle;
     struct ia64_inst* insn;
-    int slot;
+    int slot, op;
     
     for (;;) {
         ia64_decode(ip, &bundle);
         if (bundle.b_templ == 0 /* invalid insn */) {
             break;
         }
-        ip += 16; // update PC (each bundle is 16 bytes in length)
         for (slot = 0; slot < 3; slot++) {
             insn = &bundle.b_inst[slot];
             // FIXME: predicate is ignored
@@ -150,14 +165,53 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
                 case IA64_OP_ADDS:
                 case IA64_OP_ADDL:
                 case IA64_OP_ADDP4:
-                    printf("adds (%d)\n", insn->i_op);
+                    printf("adds (%d)\t", insn->i_op);
+                    if (insn->i_oper[2].o_type == IA64_OPER_IMM &&
+                        insn->i_oper[2].o_value == 0) {
+                        /* this is an add r[dest] = r[src], 0, i.e. just a
+                           mov r[dest] = r[src] */
+                        gen_op_mov_rr(insn->i_oper[1].o_value,
+                                      insn->i_oper[3].o_value);
+                        printf("\n");
+                        break;
+                    } else if (insn->i_oper[2].o_type == IA64_OPER_IMM &&
+                               insn->i_oper[3].o_type == IA64_OPER_GREG) {
+                        printf("r%lu = r%lu + %lu", insn->i_oper[1].o_value,
+                               insn->i_oper[3].o_value,
+                               insn->i_oper[2].o_value);
+                    }
+                    op = 0; op++;
+                    printf("\n");
                     break;
                 case IA64_OP_NOP:
                     printf("nop\n");
                     break;
                 case IA64_OP_MOV:
                 case IA64_OP_MOVL:
-                    printf("mov (%d)\n", insn->i_op);
+                    printf("mov%s\t", insn->i_op == IA64_OP_MOVL ? "l" : "");
+                    if (insn->i_oper[1].o_type != IA64_OPER_GREG) {
+                        /* cannot handle non-gr destination */
+                        printf("non-gr destination (type %d)\n",
+                               insn->i_oper[1].o_type);
+                        break;
+                    }
+                    switch (insn->i_oper[2].o_type) {
+                        case IA64_OPER_BREG:
+                            gen_op_mov_rb(insn->i_oper[1].o_value,
+                                          insn->i_oper[2].o_value);
+                            break;
+                        case IA64_OPER_GREG:
+                            gen_op_mov_rr(insn->i_oper[1].o_value,
+                                          insn->i_oper[2].o_value);
+                            break;
+                        case IA64_OPER_IP:
+                            gen_op_mov_r_ip(insn->i_oper[1].o_value);
+                            break;
+                        default:
+                            printf("Unhandled MOV (source oper type %d)\n",
+                                   insn->i_oper[2].o_type);
+                    };
+                    printf("\n");
                     break;
                 case IA64_OP_BREAK:
                     printf("break\n");
@@ -166,8 +220,13 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
                     printf("Unhandled opcode %d\n", insn->i_op);
                     break;
             };
+        } /* slot */
+        ip += 16; // update PC (each bundle is 16 bytes in length)
+        if (ip >= g2h(env->code_ends_at)) {
+            printf("\n\tCODE ENDS!\n");
+            break;
         }
-    }
+    } /* bundle */
     env->ip = h2g(ip);
 }
 

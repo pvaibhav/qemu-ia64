@@ -5213,6 +5213,7 @@ ia64_decode(const void *ip, struct ia64_bundle *b)
 }
 
 #include "exec.h"
+#include "helpers.h"
 
 /*****************************************************************************/
 /* Softmmu support */
@@ -5263,6 +5264,14 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
         /* helper_raise_exception_err(env->exception_index, env->error_code); */
     }
     env = saved_env;
+}
+
+/* raise an exception */
+void HELPER(exception)(uint32_t excp)
+{
+    HELPER_LOG("%s: exception %d\n", __FUNCTION__, excp);
+    env->exception_index = excp;
+    cpu_loop_exit(env);
 }
 
 #endif

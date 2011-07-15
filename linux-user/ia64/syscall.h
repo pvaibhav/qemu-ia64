@@ -8,6 +8,7 @@
 
 struct target_pt_regs {
     unsigned long pc;
+    unsigned long code_ends_at;
 };
 
 #define UNAME_MACHINE "ia64"

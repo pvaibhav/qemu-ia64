@@ -63,6 +63,7 @@ typedef struct CPUIA64State {
         } rrb;
     } cfm;
 
+    uint64_t code_ends_at;
     // TODO: cpuid, pmd, user mask and alat registers
 
     CPU_COMMON
