@@ -99,6 +99,10 @@ void cpu_dump_state(CPUState *env, FILE *f,
     // TODO: print other regs
 }
 
+static inline void gen_save_ip(void* ip_in_host) {
+    tcg_gen_movi_i64(reg_ip, h2g((uint64_t) ip_in_host));
+}
+
 static void gen_op_alloc(const uint8_t gr, const uint8_t i, const uint8_t l,
                   const uint8_t o, const uint8_t r)
 {
@@ -131,7 +135,7 @@ static void gen_op_mov_r_ip(const uint8_t dest, void* ip)
 {
     /* mov r[dest] = ip */
     printf("r%d = ip", dest);
-    tcg_gen_movi_i64(reg_ip, (uint64_t) ip);
+    gen_save_ip(ip);
     tcg_gen_mov_i64(reg_gr[dest], reg_ip);
 }
 
@@ -228,7 +232,7 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
         ip += 16; // update PC (each bundle is 16 bytes in length)
         if (ip+16 > endpoint) {
             printf("\n\tCODE ENDS!\n");
-            tcg_gen_movi_i64(reg_ip, (uint64_t) ip);
+            gen_save_ip(ip);
             tcg_gen_exit_tb(0);
             break;
         } else {
