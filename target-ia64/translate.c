@@ -159,15 +159,25 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
     
     struct ia64_bundle bundle;
     struct ia64_inst* insn;
-    int slot, op;
+    int slot, op, slots_to_skip = 0;
+    
+    /* ip is actually ip + slot number */
+    slots_to_skip = ((uint64_t) ip & 0x0f);
+    ip = (void*) ((uint64_t) ip & ~0x0f);
     
     for (;;) {
+        /* decode one bundle */
         ia64_decode(ip, &bundle);
+        
         if (bundle.b_templ == 0 /* invalid insn */) {
             break;
         }
         for (slot = 0; slot < 3; slot++) {
+            if (slots_to_skip-- > 0)
+                continue;
+            
             insn = &bundle.b_inst[slot];
+            
             // FIXME: predicate is ignored
             printf("[%d]\t", slot);
             switch (insn->i_op) {
@@ -235,6 +245,7 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
                     // FIXME: put the proper arguments in proper places first
                     gen_exception(EXCP_SYSCALL_BREAK);
                     printf("break\n");
+                    slot++; /* because for next TB we want to skip this slot */
                     goto done_with_tb;
                     break;
                 default:
@@ -251,8 +262,9 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
             printf("Current IP: 0x%lx\n", (unsigned long)ip);
         }
     } /* bundle */
+    
 done_with_tb:
-    gen_save_ip(ip);
+    gen_save_ip(ip + slot);
     tb->size = (unsigned long) ip - (tb->pc);
     printf("Exiting TB with size=0x%x\n", tb->size);
     tcg_gen_exit_tb(0);
