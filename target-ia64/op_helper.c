@@ -5266,11 +5266,11 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
     env = saved_env;
 }
 
+#endif
+
 /* raise an exception */
 void HELPER(exception)(uint32_t excp)
 {
     env->exception_index = excp;
     cpu_loop_exit(env);
 }
-
-#endif
