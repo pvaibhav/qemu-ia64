@@ -97,16 +97,16 @@ void cpu_ia64_tcg_init(void) {
  ****************************************************************************/
 
 void cpu_dump_state(CPUState *env, FILE *f,
-                    int (*cpu_fprintf)(FILE *f, const char *fmt, ...),
+                    int (*cpu_fqemu_log)(FILE *f, const char *fmt, ...),
                     int flags)
 {
     int i;
     for (i = 0; i < 128; i++) {
-        cpu_fprintf(f, "gr%02d=%016lx", i, env->gr[i]);
+        cpu_fqemu_log(f, "gr%02d=%016lx", i, env->gr[i]);
         if ((i % 4) == 3) {
-            cpu_fprintf(f, "\n");
+            cpu_fqemu_log(f, "\n");
         } else {
-            cpu_fprintf(f, " ");
+            cpu_fqemu_log(f, " ");
         }
     }
     // TODO: print other regs
@@ -140,28 +140,41 @@ static inline void gen_op_alloc(const uint8_t gr, const uint8_t i, const uint8_t
 static inline void gen_op_mov_rr(const uint8_t dest, const uint8_t source)
 {
     /* mov r[dest] = r[source] */
-    printf("r%d = r%d", dest, source);
+    qemu_log("r%d = r%d", dest, source);
     tcg_gen_mov_i64(reg_gr[dest], reg_gr[source]);
 }
 
 static inline void gen_op_mov_rb(const uint8_t dest, const uint8_t source)
 {
     /* mov r[dest] = b[source] */
-    printf("r%d = b%d", dest, source);
+    qemu_log("r%d = b%d", dest, source);
     tcg_gen_mov_i64(reg_gr[dest], reg_br[source]);
 }
 
 static inline void gen_op_mov_r_ip(const uint8_t dest, void* ip)
 {
     /* mov r[dest] = ip */
-    printf("r%d = ip", dest);
+    qemu_log("r%d = ip", dest);
     gen_save_ip(ip);
     tcg_gen_mov_i64(reg_gr[dest], reg_ip);
 }
 
+static inline void gen_op_add_rri(const uint8_t dest,
+                                  const uint8_t src,
+                                  const uint32_t imm)
+{
+    /* add r[dest] = r[src] + imm */
+    qemu_log("r%d = r%d + %d", dest, src, imm);
+    if (src == 0 /* r0 is always zero */) {
+        tcg_gen_movi_i64(reg_gr[dest], imm);
+    } else {
+        tcg_gen_addi_i64(reg_gr[dest], reg_gr[src], imm);
+    }
+}
+
 void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
 {
-    printf("gen_intermediate_code pc=0x%lx, size=%u, flags=0x%lx, end=0x%lx\n",
+    qemu_log("gen_intermediate_code pc=0x%lx, size=%u, flags=0x%lx, end=0x%lx\n",
            tb->pc, tb->size, (unsigned long)tb->flags, env->code_ends_at);
     
     void* ip = g2h(env->ip); // get pointer to the entry point
@@ -169,13 +182,15 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
     
     struct ia64_bundle bundle;
     struct ia64_inst* insn;
-    int slot, op, slots_to_skip = 0;
+    int slot, slots_to_skip = 0;
     
     /* ip is actually ip + slot number */
     slots_to_skip = ((uint64_t) ip & 0x0f);
     ip = (void*) ((uint64_t) ip & ~0x0f);
     
-    printf("ip is %lu, slots to skip=%d\n", (uint64_t) ip, slots_to_skip);
+    tb->size = 0;
+    
+    qemu_log("ip is 0x%lx, slots to skip=%d\n", (uint64_t) ip, slots_to_skip);
     
     for (;;) {
         /* decode one bundle */
@@ -186,17 +201,17 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
         }
         for (slot = 0; slot < 3; slot++) {
             if (slots_to_skip-- > 0) {
-                printf("Skipping slot %d\n", slot);
+                qemu_log("Skipping slot %d\n", slot);
                 continue;
             }
             
             insn = &bundle.b_inst[slot];
             
             // FIXME: predicate is ignored
-            printf("[%d]\t", slot);
+            qemu_log("[%d]\t", slot);
             switch (insn->i_op) {
                 case IA64_OP_ALLOC:
-                    printf("alloc\n");
+                    qemu_log("alloc\n");
                     gen_op_alloc(insn->i_oper[1].o_value, /* r# */
                                  insn->i_oper[3].o_value, /* i */
                                  insn->i_oper[4].o_value, /* l */
@@ -207,33 +222,35 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
                 case IA64_OP_ADDS:
                 case IA64_OP_ADDL:
                 case IA64_OP_ADDP4:
-                    printf("adds (%d)\t", insn->i_op);
+                    qemu_log("adds (%d)\t", insn->i_op);
                     if (insn->i_oper[2].o_type == IA64_OPER_IMM &&
                         insn->i_oper[2].o_value == 0) {
                         /* this is an add r[dest] = r[src], 0, i.e. just a
                            mov r[dest] = r[src] */
                         gen_op_mov_rr(insn->i_oper[1].o_value,
                                       insn->i_oper[3].o_value);
-                        printf("\n");
+                        qemu_log("\n");
                         break;
                     } else if (insn->i_oper[2].o_type == IA64_OPER_IMM &&
                                insn->i_oper[3].o_type == IA64_OPER_GREG) {
-                        printf("r%lu = r%lu + %lu", insn->i_oper[1].o_value,
-                               insn->i_oper[3].o_value,
-                               insn->i_oper[2].o_value);
+                        gen_op_add_rri(insn->i_oper[1].o_value,
+                                       insn->i_oper[3].o_value,
+                                       insn->i_oper[2].o_value);
+                                       
+                    } else {
+                        qemu_log("unhandled");
                     }
-                    op = 0; op++;
-                    printf("\n");
+                    qemu_log("\n");
                     break;
                 case IA64_OP_NOP:
-                    printf("nop\n");
+                    qemu_log("nop\n");
                     break;
                 case IA64_OP_MOV:
                 case IA64_OP_MOVL:
-                    printf("mov%s\t", insn->i_op == IA64_OP_MOVL ? "l" : "");
+                    qemu_log("mov%s\t", insn->i_op == IA64_OP_MOVL ? "l" : "");
                     if (insn->i_oper[1].o_type != IA64_OPER_GREG) {
                         /* cannot handle non-gr destination */
-                        printf("non-gr destination (type %d)\n",
+                        qemu_log("non-gr destination (type %d)\n",
                                insn->i_oper[1].o_type);
                         break;
                     }
@@ -250,46 +267,47 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
                             gen_op_mov_r_ip(insn->i_oper[1].o_value, ip);
                             break;
                         default:
-                            printf("Unhandled MOV (source oper type %d)\n",
+                            qemu_log("Unhandled MOV (source oper type %d)\n",
                                    insn->i_oper[2].o_type);
                     };
-                    printf("\n");
+                    qemu_log("\n");
                     break;
                 case IA64_OP_BREAK:
                     // FIXME: put the proper arguments in proper places first
                     gen_exception(EXCP_SYSCALL_BREAK);
-                    printf("break\n");
+                    qemu_log("break\n");
                     slot++; /* because for next TB we want to skip this slot */
                     goto done_with_tb;
                     break;
                 default:
-                    printf("Unhandled opcode %d\n", insn->i_op);
+                    qemu_log("Unhandled opcode %d\n", insn->i_op);
                     break;
             };
         } /* slot */
         ip += 16; // update PC (each bundle is 16 bytes in length)
+        tb->size += 16;
         if (ip+16 > endpoint) { // FIXME: the +16 shouldn't exist
-            printf("\n\tCODE ENDS!\n");
+            qemu_log("\n\tCODE ENDS!\n");
             goto done_with_tb;
             break;
         } else {
-            printf("Current IP: 0x%lx\n", (unsigned long)ip);
+            qemu_log("Current IP: 0x%lx\n", (unsigned long)ip);
         }
     } /* bundle */
     
 done_with_tb:
     gen_save_ip(ip + slot);
-    tb->size = (unsigned long) ip - (tb->pc);
-    printf("Exiting TB with size=0x%x\n", tb->size);
+    qemu_log("Exiting TB with size=0x%x, ip=0x%lx\n", tb->size,
+           (unsigned long)ip+slot);
     tcg_gen_exit_tb(0);
 }
 
 void gen_intermediate_code_pc (CPUState *env, struct TranslationBlock *tb)
 {
-    printf("gen_intermediate_code_pc called\n");
+    qemu_log("gen_intermediate_code_pc called\n");
 }
 
 void restore_state_to_opc(CPUState *env, TranslationBlock *tb, int pc_pos)
 {
-    printf("restore_state_to_opc called\n");
+    qemu_log("restore_state_to_opc called\n");
 }

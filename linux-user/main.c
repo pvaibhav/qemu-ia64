@@ -2763,8 +2763,18 @@ void cpu_loop(CPUIA64State *env)
 
         switch (trapnr) {
             case EXCP_SYSCALL_BREAK:
-                printf("===== TADA ==== SYSCALL =====\n");
                 trapnr = env->gr[15];
+                // FIXME: use a better method to map target -> host syscall
+                switch (trapnr) {
+                    case 1027:
+                        // write
+                        trapnr = 4;
+                        break;
+                    case 1025:
+                        // exit
+                        trapnr = 1;
+                        break;
+                };
                 do_syscall(env, trapnr,
                                     env->gr[36], env->gr[37],
                                     env->gr[38], 0,
