@@ -40,6 +40,7 @@ static TCGv_i32 reg_sof;
 static TCGv_i32 reg_sor;
 
 static const char* reg_name_r[] = {
+    "r0",
     "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8",
     "r9", "r10", "r11", "r12", "r13", "r14", "r15", "r16",
     "r17", "r18", "r19", "r20", "r21", "r22", "r23", "r24",
@@ -75,7 +76,7 @@ void cpu_ia64_tcg_init(void) {
     }
     
     for (r = 0; r < 8; r++) {
-        reg_gr[r] = tcg_global_mem_new_i64(TCG_AREG0, offsetof(CPUState, br[r]),
+        reg_br[r] = tcg_global_mem_new_i64(TCG_AREG0, offsetof(CPUState, br[r]),
                                            reg_name_b[r]);
     }
     
@@ -123,8 +124,9 @@ static inline void gen_exception(unsigned int excp) {
     tcg_temp_free_i32(tmp);
 }
 
-static inline void gen_op_alloc(const uint8_t gr, const uint8_t i, const uint8_t l,
-                  const uint8_t o, const uint8_t r)
+static inline void gen_op_alloc(const uint8_t gr, const uint8_t i,
+                                const uint8_t l,  const uint8_t o,
+                                const uint8_t r)
 {
     /* alloc r[gr] = ar.pfs, i, l, o, r */
     if ((i + l + o) > 96 || r > (i + l)) {
@@ -141,7 +143,11 @@ static inline void gen_op_mov_rr(const uint8_t dest, const uint8_t source)
 {
     /* mov r[dest] = r[source] */
     qemu_log("r%d = r%d", dest, source);
-    tcg_gen_mov_i64(reg_gr[dest], reg_gr[source]);
+    if (source == 0) {
+        tcg_gen_movi_i64(reg_gr[dest], 0);
+    } else {
+        tcg_gen_mov_i64(reg_gr[dest], reg_gr[source]);
+    }
 }
 
 static inline void gen_op_mov_rb(const uint8_t dest, const uint8_t source)
@@ -156,7 +162,10 @@ static inline void gen_op_mov_r_ip(const uint8_t dest, void* ip)
     /* mov r[dest] = ip */
     qemu_log("r%d = ip", dest);
     gen_save_ip(ip);
-    tcg_gen_mov_i64(reg_gr[dest], reg_ip);
+    TCGv_i64 tmp = tcg_temp_new_i64();
+    tcg_gen_mov_i64(tmp, reg_ip);
+    tcg_gen_andi_i64(reg_gr[dest], tmp, ~0x03);
+    tcg_temp_free_i64(tmp);
 }
 
 static inline void gen_op_add_rri(const uint8_t dest,
@@ -166,9 +175,9 @@ static inline void gen_op_add_rri(const uint8_t dest,
     /* add r[dest] = r[src] + imm */
     qemu_log("r%d = r%d + %d", dest, src, imm);
     if (src == 0 /* r0 is always zero */) {
-        tcg_gen_movi_i64(reg_gr[dest], imm);
+        tcg_gen_movi_i64(reg_gr[dest], (uint64_t) imm);
     } else {
-        tcg_gen_addi_i64(reg_gr[dest], reg_gr[src], imm);
+        tcg_gen_addi_i64(reg_gr[dest], reg_gr[src], (uint64_t) imm);
     }
 }
 
@@ -210,84 +219,84 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
             // FIXME: predicate is ignored
             qemu_log("[%d]\t", slot);
             switch (insn->i_op) {
-                case IA64_OP_ALLOC:
-                    qemu_log("alloc\n");
-                    gen_op_alloc(insn->i_oper[1].o_value, /* r# */
-                                 insn->i_oper[3].o_value, /* i */
-                                 insn->i_oper[4].o_value, /* l */
-                                 insn->i_oper[5].o_value, /* o */
-                                 insn->i_oper[6].o_value  /* r */);
+            case IA64_OP_ALLOC:
+                qemu_log("alloc\n");
+                gen_op_alloc(insn->i_oper[1].o_value, /* r# */
+                             insn->i_oper[3].o_value, /* i */
+                             insn->i_oper[4].o_value, /* l */
+                             insn->i_oper[5].o_value, /* o */
+                             insn->i_oper[6].o_value  /* r */);
+                break;
+            case IA64_OP_ADD:
+            case IA64_OP_ADDS:
+            case IA64_OP_ADDL:
+            case IA64_OP_ADDP4:
+                qemu_log("adds (%d)\t", insn->i_op);
+                if (insn->i_oper[2].o_type == IA64_OPER_IMM &&
+                    insn->i_oper[2].o_value == 0)
+                {
+                    /* this is an add r[dest] = r[src], 0, i.e. just a
+                       mov r[dest] = r[src] */
+                    gen_op_mov_rr(insn->i_oper[1].o_value,
+                                  insn->i_oper[3].o_value);
+                } else if (insn->i_oper[2].o_type == IA64_OPER_IMM &&
+                           insn->i_oper[3].o_type == IA64_OPER_GREG) {
+                    gen_op_add_rri(insn->i_oper[1].o_value,
+                                   insn->i_oper[3].o_value,
+                                   insn->i_oper[2].o_value);
+
+                } else {
+                    qemu_log("unhandled");
+                }
+                qemu_log("\n");
+                break;
+            case IA64_OP_NOP:
+                qemu_log("nop\n");
+                break;
+            case IA64_OP_MOV:
+            case IA64_OP_MOVL:
+                qemu_log("mov%s\t", insn->i_op == IA64_OP_MOVL ? "l" : "");
+                if (insn->i_oper[1].o_type != IA64_OPER_GREG) {
+                    /* cannot handle non-gr destination */
+                    qemu_log("non-gr destination (type %d)\n",
+                           insn->i_oper[1].o_type);
                     break;
-                case IA64_OP_ADD:
-                case IA64_OP_ADDS:
-                case IA64_OP_ADDL:
-                case IA64_OP_ADDP4:
-                    qemu_log("adds (%d)\t", insn->i_op);
-                    if (insn->i_oper[2].o_type == IA64_OPER_IMM &&
-                        insn->i_oper[2].o_value == 0) {
-                        /* this is an add r[dest] = r[src], 0, i.e. just a
-                           mov r[dest] = r[src] */
+                }
+                switch (insn->i_oper[2].o_type) {
+                    case IA64_OPER_BREG:
+                        gen_op_mov_rb(insn->i_oper[1].o_value,
+                                      insn->i_oper[2].o_value);
+                        break;
+                    case IA64_OPER_GREG:
                         gen_op_mov_rr(insn->i_oper[1].o_value,
-                                      insn->i_oper[3].o_value);
-                        qemu_log("\n");
+                                      insn->i_oper[2].o_value);
                         break;
-                    } else if (insn->i_oper[2].o_type == IA64_OPER_IMM &&
-                               insn->i_oper[3].o_type == IA64_OPER_GREG) {
-                        gen_op_add_rri(insn->i_oper[1].o_value,
-                                       insn->i_oper[3].o_value,
-                                       insn->i_oper[2].o_value);
-                                       
-                    } else {
-                        qemu_log("unhandled");
-                    }
-                    qemu_log("\n");
-                    break;
-                case IA64_OP_NOP:
-                    qemu_log("nop\n");
-                    break;
-                case IA64_OP_MOV:
-                case IA64_OP_MOVL:
-                    qemu_log("mov%s\t", insn->i_op == IA64_OP_MOVL ? "l" : "");
-                    if (insn->i_oper[1].o_type != IA64_OPER_GREG) {
-                        /* cannot handle non-gr destination */
-                        qemu_log("non-gr destination (type %d)\n",
-                               insn->i_oper[1].o_type);
+                    case IA64_OPER_IP:
+                        gen_op_mov_r_ip(insn->i_oper[1].o_value, ip);
                         break;
-                    }
-                    switch (insn->i_oper[2].o_type) {
-                        case IA64_OPER_BREG:
-                            gen_op_mov_rb(insn->i_oper[1].o_value,
-                                          insn->i_oper[2].o_value);
-                            break;
-                        case IA64_OPER_GREG:
-                            gen_op_mov_rr(insn->i_oper[1].o_value,
-                                          insn->i_oper[2].o_value);
-                            break;
-                        case IA64_OPER_IP:
-                            gen_op_mov_r_ip(insn->i_oper[1].o_value, ip);
-                            break;
-                        default:
-                            qemu_log("Unhandled MOV (source oper type %d)\n",
-                                   insn->i_oper[2].o_type);
-                    };
-                    qemu_log("\n");
-                    break;
-                case IA64_OP_BREAK:
-                    // FIXME: put the proper arguments in proper places first
-                    gen_exception(EXCP_SYSCALL_BREAK);
-                    qemu_log("break\n");
-                    slot++; /* because for next TB we want to skip this slot */
-                    goto done_with_tb;
-                    break;
-                default:
-                    qemu_log("Unhandled opcode %d\n", insn->i_op);
-                    break;
+                    default:
+                        qemu_log("Unhandled MOV (source oper type %d)\n",
+                               insn->i_oper[2].o_type);
+                };
+                qemu_log("\n");
+                break;
+            case IA64_OP_BREAK:
+                qemu_log("break\n");
+                slot++;
+                gen_save_ip(ip + slot);
+                gen_exception(EXCP_SYSCALL_BREAK);
+                goto done_with_tb;
+                break;
+            default:
+                qemu_log("Unhandled opcode %d\n", insn->i_op);
+                break;
             };
         } /* slot */
         ip += 16; // update PC (each bundle is 16 bytes in length)
         tb->size += 16;
-        if (ip+16 > endpoint) { // FIXME: the +16 shouldn't exist
+        if (ip > endpoint) {
             qemu_log("\n\tCODE ENDS!\n");
+            gen_save_ip(ip + slot);
             goto done_with_tb;
             break;
         } else {
@@ -296,9 +305,9 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
     } /* bundle */
     
 done_with_tb:
-    gen_save_ip(ip + slot);
     qemu_log("Exiting TB with size=0x%x, ip=0x%lx\n", tb->size,
-           (unsigned long)ip+slot);
+             (unsigned long)ip+slot);
+    *gen_opc_ptr = INDEX_op_end;
     tcg_gen_exit_tb(0);
 }
 

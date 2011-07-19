@@ -1344,7 +1344,7 @@ static void probe_guest_base(const char *image_name,
          Hence just set it to mmap_min_addr. The offset will then be large
          enough that host_start will wrap back.
          */
-        host_start = HOST_PAGE_ALIGN(mmap_min_addr);
+        host_start = 0x400000; //XXX: HOST_PAGE_ALIGN(mmap_min_addr);
 #else
         if (loaddr < mmap_min_addr) {
             host_start = HOST_PAGE_ALIGN(mmap_min_addr);

@@ -68,3 +68,4 @@ cscope.*
 tags
 TAGS
 *~
+/nbproject/private/
