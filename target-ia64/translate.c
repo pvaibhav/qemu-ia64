@@ -32,6 +32,7 @@
 /* TCG globals to map to cpu registers and other state */
 static TCGv_ptr reg_env;        // CPUState struct pointer
 static TCGv_i64 reg_gr[128];    // general registers
+static TCGv_i64 reg_br[8];      // branch registers
 static TCGv_i64 reg_ip;         // instruction pointer
 static TCGv_i64 reg_ar_pfs;     // application register ar.pfs
 static TCGv_i32 reg_sol;        // fields from cfm
@@ -57,6 +58,10 @@ static const char* reg_name_r[] = {
     "r121", "r122", "r123", "r124", "r125", "r126", "r127"
 };
 
+static const char* reg_name_b[] = {
+    "b0", "b1", "b2", "b3", "b4", "b5", "b6", "b7"
+};
+
 void cpu_ia64_tcg_init(void) {
     int r;
     
@@ -67,6 +72,11 @@ void cpu_ia64_tcg_init(void) {
     for (r = 0; r < 128; r++) {
         reg_gr[r] = tcg_global_mem_new_i64(TCG_AREG0, offsetof(CPUState, gr[r]),
                                        reg_name_r[r]);
+    }
+    
+    for (r = 0; r < 8; r++) {
+        reg_gr[r] = tcg_global_mem_new_i64(TCG_AREG0, offsetof(CPUState, br[r]),
+                                           reg_name_b[r]);
     }
     
     reg_sol = tcg_global_mem_new_i32(TCG_AREG0, offsetof(CPUState, cfm.sol),
@@ -109,7 +119,7 @@ static inline void gen_save_ip(void* ip_in_host) {
 static inline void gen_exception(unsigned int excp) {
     TCGv_i32 tmp = tcg_temp_new_i32();
     tcg_gen_movi_i32(tmp, excp);
-    //gen_helper_exception(tmp);
+    gen_helper_exception(tmp);
     tcg_temp_free_i32(tmp);
 }
 
@@ -138,7 +148,7 @@ static inline void gen_op_mov_rb(const uint8_t dest, const uint8_t source)
 {
     /* mov r[dest] = b[source] */
     printf("r%d = b%d", dest, source);
-    tcg_gen_mov_i64(reg_gr[dest], reg_gr[source]);
+    tcg_gen_mov_i64(reg_gr[dest], reg_br[source]);
 }
 
 static inline void gen_op_mov_r_ip(const uint8_t dest, void* ip)
@@ -165,6 +175,8 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
     slots_to_skip = ((uint64_t) ip & 0x0f);
     ip = (void*) ((uint64_t) ip & ~0x0f);
     
+    printf("ip is %lu, slots to skip=%d\n", (uint64_t) ip, slots_to_skip);
+    
     for (;;) {
         /* decode one bundle */
         ia64_decode(ip, &bundle);
@@ -173,8 +185,10 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
             break;
         }
         for (slot = 0; slot < 3; slot++) {
-            if (slots_to_skip-- > 0)
+            if (slots_to_skip-- > 0) {
+                printf("Skipping slot %d\n", slot);
                 continue;
+            }
             
             insn = &bundle.b_inst[slot];
             
@@ -254,7 +268,7 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
             };
         } /* slot */
         ip += 16; // update PC (each bundle is 16 bytes in length)
-        if (ip+16 > endpoint) {
+        if (ip+16 > endpoint) { // FIXME: the +16 shouldn't exist
             printf("\n\tCODE ENDS!\n");
             goto done_with_tb;
             break;
