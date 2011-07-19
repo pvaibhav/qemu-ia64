@@ -2756,12 +2756,20 @@ void cpu_loop(CPUIA64State *env)
 {
     int trapnr;
     // XXX needed later: target_siginfo_t info;
+    
     printf("cpu_loop for IA64 started\n");
     while (1) {
         trapnr = cpu_ia64_exec (env);
 
         switch (trapnr) {
             case EXCP_SYSCALL_BREAK:
+                printf("===== TADA ==== SYSCALL =====\n");
+                trapnr = env->gr[15];
+                do_syscall(env, trapnr,
+                                    env->gr[36], env->gr[37],
+                                    env->gr[38], 0,
+                                    0, 0,
+                                    0, 0);
                 /* Handle syscall via break.m insn */
                 break;
         default:
