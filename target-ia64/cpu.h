@@ -42,7 +42,6 @@
 
 typedef struct CPUIA64State {
     uint64_t    gr[128];    // general registers gr0 - gr127
-    uint64_t    br[8];      // branch registers b0 - b7
     uint64_t    pr;         // predicate registers, pr[qp] = 1 & (pr >> qp)
 #define IA64_BIT_IS_SET(p,x) (1 & ((p) >> (x)))
 #define IA64_SET_BIT(p,x)    ((p) = (p) | (1 << (x)))
