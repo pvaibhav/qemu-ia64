@@ -1387,9 +1387,6 @@ static void probe_guest_base(const char *image_name,
                 goto exit_errmsg;
             }
         }
-        printf("Relocating guest address space from 0x"
-                 TARGET_ABI_FMT_lx " to 0x%lx\n",
-                 loaddr, real_start);
         guest_base = real_start - loaddr;
     }
     return;

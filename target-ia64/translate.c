@@ -307,8 +307,8 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
 done_with_tb:
     qemu_log("Exiting TB with size=0x%x, ip=0x%lx\n", tb->size,
              (unsigned long)ip+slot);
-    *gen_opc_ptr = INDEX_op_end;
     tcg_gen_exit_tb(0);
+    *gen_opc_ptr = INDEX_op_end;
 }
 
 void gen_intermediate_code_pc (CPUState *env, struct TranslationBlock *tb)

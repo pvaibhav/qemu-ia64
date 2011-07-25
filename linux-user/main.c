@@ -2757,7 +2757,6 @@ void cpu_loop(CPUIA64State *env)
     int trapnr;
     // XXX needed later: target_siginfo_t info;
     
-    printf("cpu_loop for IA64 started\n");
     while (1) {
         trapnr = cpu_ia64_exec (env);
 
