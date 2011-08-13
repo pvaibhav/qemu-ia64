@@ -5233,37 +5233,20 @@ ia64_decode(const void *ip, struct ia64_bundle *b)
 #define SHIFT 3
 #include "softmmu_template.h"
 
-/* try to fill the TLB and return an exception if error. If retaddr is
-   NULL, it means that the function was called in C code (i.e. not
-   from generated code or from helper.c) */
-/* XXX: fix it to restore all registers */
-void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
+/* Handle a CPU exception.  */
+void do_interrupt(CPUIA64State *env)
 {
-    TranslationBlock *tb;
-    CPUState *saved_env;
-    unsigned long pc;
-    int ret;
+    qemu_log("do_interrupt\n");
+}
 
-    /* XXX: hack to restore env in all cases, even if not called from
-       generated code */
-    saved_env = env;
-    env = cpu_single_env;
-    ret = cpu_ia64_handle_mmu_fault(env, addr, is_write, mmu_idx, 1);
-    if (unlikely(ret != 0)) {
-        if (likely(retaddr)) {
-            /* now we have a real cpu fault */
-            pc = (unsigned long)retaddr;
-            tb = tb_find_pc(pc);
-            if (likely(tb)) {
-                /* the PC is inside the translated code. It means that we have
-                   a virtual CPU fault */
-                cpu_restore_state(tb, env, pc, NULL);
-            }
-        }
-        /* XXX */
-        /* helper_raise_exception_err(env->exception_index, env->error_code); */
-    }
-    env = saved_env;
+void tlb_fill (target_ulong addr, int is_write, int is_user, void *retaddr)
+{
+    return;
+}
+
+target_ulong cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
+{
+    return -1;
 }
 
 #endif
@@ -5274,3 +5257,4 @@ void HELPER(exception)(uint32_t excp)
     env->exception_index = excp;
     cpu_loop_exit(env);
 }
+

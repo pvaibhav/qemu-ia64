@@ -28,7 +28,7 @@
 #define CPUState struct CPUIA64State
 
 #include "cpu-defs.h"
-#define TARGET_PAGE_BITS 12
+#define TARGET_PAGE_BITS 16
 
 #define TARGET_PHYS_ADDR_SPACE_BITS 64
 #define TARGET_VIRT_ADDR_SPACE_BITS 64
@@ -79,6 +79,11 @@ CPUIA64State *cpu_ia64_init(const char *cpu_model);
 int cpu_ia64_exec(CPUIA64State *s);
 void cpu_ia64_close(CPUIA64State *s);
 void cpu_ia64_tcg_init(void);
+void do_interrupt (CPUState *env);
+static inline int cpu_mmu_index (CPUState *env)
+{
+        return 0;
+}
 
 /* you can call this signal handler from your SIGBUS and SIGSEGV
    signal handlers to inform the virtual CPU of exceptions. non zero

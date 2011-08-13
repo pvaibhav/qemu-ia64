@@ -113,8 +113,8 @@ void cpu_dump_state(CPUState *env, FILE *f,
     // TODO: print other regs
 }
 
-static inline void gen_save_ip(void* ip_in_host) {
-    tcg_gen_movi_i64(reg_ip, h2g((uint64_t) ip_in_host));
+static inline void gen_save_ip(target_ulong ip) {
+    tcg_gen_movi_i64(reg_ip, ip);
 }
 
 static inline void gen_exception(unsigned int excp) {
@@ -157,7 +157,7 @@ static inline void gen_op_mov_rb(const uint8_t dest, const uint8_t source)
     tcg_gen_mov_i64(reg_gr[dest], reg_br[source]);
 }
 
-static inline void gen_op_mov_r_ip(const uint8_t dest, void* ip)
+static inline void gen_op_mov_r_ip(const uint8_t dest, target_ulong ip)
 {
     /* mov r[dest] = ip */
     qemu_log("r%d = ip", dest);
@@ -185,17 +185,22 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
 {
     qemu_log("gen_intermediate_code pc=0x%lx, size=%u, flags=0x%lx, end=0x%lx\n",
            tb->pc, tb->size, (unsigned long)tb->flags, env->code_ends_at);
+
+    struct {
+        uint64_t upper;
+        uint64_t lower;
+    } bundle_to_decode;
     
-    void* ip = g2h(env->ip); // get pointer to the entry point
-    void* endpoint = g2h(env->code_ends_at);
-    
+    target_ulong ip = tb->pc; // start point of the TB
+    target_ulong endpoint = env->code_ends_at;
+
     struct ia64_bundle bundle;
     struct ia64_inst* insn;
     int slot, slots_to_skip = 0;
     
     /* ip is actually ip + slot number */
-    slots_to_skip = ((uint64_t) ip & 0x0f);
-    ip = (void*) ((uint64_t) ip & ~0x0f);
+    slots_to_skip = (uint64_t) ip & 0x0f;
+    ip = ip & (~0x0f);
     
     tb->size = 0;
     
@@ -203,7 +208,9 @@ void gen_intermediate_code (CPUState *env, struct TranslationBlock *tb)
     
     for (;;) {
         /* decode one bundle */
-        ia64_decode(ip, &bundle);
+        bundle_to_decode.upper = ldq_code(ip);
+        bundle_to_decode.lower = ldq_code(ip + sizeof(uint64_t));
+        ia64_decode(&bundle_to_decode, &bundle);
         
         if (bundle.b_templ == 0 /* invalid insn */) {
             break;
