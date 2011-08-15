@@ -4,6 +4,7 @@
  * Copyright (c) 2003-2004 Fabrice Bellard
  *
  * Copyright (c) 2007 Intel
+ * Copyright (c) 2011 Prashant Vaibhav <qemu@mercurysquad.com>
  * Ported for IA64 Platform Zhang Xiantao <xiantao.zhang@intel.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -27,7 +28,7 @@
 
 #include "hw.h"
 #include "pc.h"
-#include "fdc.h"
+/* #include "fdc.h" */
 #include "pci.h"
 #include "block.h"
 #include "sysemu.h"
@@ -38,10 +39,7 @@
 #include "firmware.h"
 #include "ia64intrin.h"
 #include <unistd.h>
-//#include "device-assignment.h"
 #include "virtio-blk.h"
-
-//#include "qemu-kvm.h"
 
 #define FW_FILENAME "Flash.fd"
 
@@ -49,13 +47,11 @@
 #define ACPI_DATA_SIZE       0x10000
 
 #define MAX_IDE_BUS 2
-#if !defined(kvm_enabled)
-#define kvm_enabled(a) (0)
-#endif
 
-static fdctrl_t *floppy_controller;
-static RTCState *rtc_state;
+static ISADevice *rtc_state;
 static PCIDevice *i440fx_state;
+
+extern void rtc_set_memory(ISADevice *dev, int addr, int val);
 
 static uint32_t ipf_to_legacy_io(target_phys_addr_t addr)
 {
@@ -66,42 +62,42 @@ static void ipf_legacy_io_writeb(void *opaque, target_phys_addr_t addr,
 				 uint32_t val) {
     uint32_t port = ipf_to_legacy_io(addr);
 
-    cpu_outb(0, port, val);
+    cpu_outb(port, val);
 }
 
 static void ipf_legacy_io_writew(void *opaque, target_phys_addr_t addr,
 				 uint32_t val) {
     uint32_t port = ipf_to_legacy_io(addr);
 
-    cpu_outw(0, port, val);
+    cpu_outw(port, val);
 }
 
 static void ipf_legacy_io_writel(void *opaque, target_phys_addr_t addr,
 				 uint32_t val) {
     uint32_t port = ipf_to_legacy_io(addr);
 
-    cpu_outl(0, port, val);
+    cpu_outl(port, val);
 }
 
 static uint32_t ipf_legacy_io_readb(void *opaque, target_phys_addr_t addr)
 {
     uint32_t port = ipf_to_legacy_io(addr);
 
-    return cpu_inb(0, port);
+    return cpu_inb(port);
 }
 
 static uint32_t ipf_legacy_io_readw(void *opaque, target_phys_addr_t addr)
 {
     uint32_t port = ipf_to_legacy_io(addr);
 
-    return cpu_inw(0, port);
+    return cpu_inw(port);
 }
 
 static uint32_t ipf_legacy_io_readl(void *opaque, target_phys_addr_t addr)
 {
     uint32_t port = ipf_to_legacy_io(addr);
 
-    return cpu_inl(0, port);
+    return cpu_inl(port);
 }
 
 static CPUReadMemoryFunc *ipf_legacy_io_read[3] = {
@@ -125,6 +121,7 @@ static void pic_irq_request(void *opaque, int irq, int level)
 
 #define REG_EQUIPMENT_BYTE          0x14
 
+#if 0 /* pvaibhav: disabling floppy drive emulation */
 static int cmos_get_fd_drive_type(int fd0)
 {
     int val;
@@ -148,10 +145,11 @@ static int cmos_get_fd_drive_type(int fd0)
     }
     return val;
 }
+#endif
 
 static void cmos_init_hd(int type_ofs, int info_ofs, BlockDriverState *hd)
 {
-    RTCState *s = rtc_state;
+    ISADevice *s = rtc_state;
     int cylinders, heads, sectors;
 
     bdrv_get_geometry_hint(hd, &cylinders, &heads, &sectors);
@@ -188,10 +186,10 @@ static int boot_device2nibble(char boot_device)
 static void cmos_init(ram_addr_t ram_size, ram_addr_t above_4g_mem_size,
                       const char *boot_device, BlockDriverState **hd_table)
 {
-    RTCState *s = rtc_state;
+    ISADevice *s = rtc_state;
     int nbds, bds[3] = { 0, };
     int val;
-    int fd0, fd1, nb;
+    /* int fd0, fd1, nb; */
     int i;
 
     /* various important CMOS locations needed by PC/Bochs bios */
@@ -247,7 +245,7 @@ static void cmos_init(ram_addr_t ram_size, ram_addr_t above_4g_mem_size,
     rtc_set_memory(s, 0x38, (bds[2] << 4) | (fd_bootchk ?  0x0 : 0x1));
 
     /* floppy type */
-
+#if 0 /* pvaibhav : disabling floppy drive emulation */
     fd0 = fdctrl_get_drive_type(floppy_controller, 0);
     fd1 = fdctrl_get_drive_type(floppy_controller, 1);
 
@@ -271,6 +269,7 @@ static void cmos_init(ram_addr_t ram_size, ram_addr_t above_4g_mem_size,
         val |= 0x41; /* 2 drives, ready for boot */
         break;
     }
+#endif
 
     val |= 0x02; /* FPU is there */
     val |= 0x04; /* PS/2 mouse installed */
@@ -365,13 +364,13 @@ static void audio_init (PCIBus *pci_bus, qemu_irq *pic)
 }
 #endif
 
-static void pc_init_ne2k_isa(NICInfo *nd, qemu_irq *pic)
+static void ia64_init_ne2k_isa(NICInfo *nd, qemu_irq *pic)
 {
     static int nb_ne2k = 0;
 
     if (nb_ne2k == NE2000_NB_MAX)
         return;
-    isa_ne2000_init(ne2000_io[nb_ne2k], pic[ne2000_irq[nb_ne2k]], nd);
+    isa_ne2000_init(ne2000_io[nb_ne2k], (pic[ne2000_irq[nb_ne2k]])->n, nd);
     nb_ne2k++;
 }
 
@@ -396,7 +395,7 @@ static void ipf_init1(ram_addr_t ram_size,
     int index;
     unsigned long ipf_legacy_io_base, ipf_legacy_io_mem;
     BlockDriverState *hd[MAX_IDE_BUS * MAX_IDE_DEVS];
-    BlockDriverState *fd[MAX_FD];
+    /* pvaibhav: BlockDriverState *fd[MAX_FD]; */
 
     page_size = getpagesize();
     if (page_size != TARGET_PAGE_SIZE) {
@@ -452,7 +451,7 @@ static void ipf_init1(ram_addr_t ram_size,
     }
 
     /*Load firware to its proper position.*/
-    if (kvm_enabled()) {
+    if (1 /* kvm_enabled() */) {
         unsigned long  image_size;
         uint8_t *image = NULL;
         unsigned long nvram_addr;
@@ -545,7 +544,7 @@ static void ipf_init1(ram_addr_t ram_size,
         NICInfo *nd = &nd_table[i];
 
         if (!pci_enabled || (nd->model && strcmp(nd->model, "ne2k_isa") == 0))
-            pc_init_ne2k_isa(nd, i8259);
+            ia64_init_ne2k_isa(nd, i8259);
         else
             pci_nic_init(nd, "e1000", NULL);
     }
@@ -582,7 +581,7 @@ static void ipf_init1(ram_addr_t ram_size,
 #ifdef HAS_AUDIO
     audio_init(pci_enabled ? pci_bus : NULL, i8259);
 #endif
-
+#if 0 /* pvaibhav: disable floppy emulation */
     for(i = 0; i < MAX_FD; i++) {
         index = drive_get_index(IF_FLOPPY, 0, i);
 	if (index != -1)
@@ -591,7 +590,7 @@ static void ipf_init1(ram_addr_t ram_size,
 	    fd[i] = NULL;
     }
     floppy_controller = fdctrl_init(i8259[6], 2, 0, 0x3f0, fd);
-
+#endif
     cmos_init(ram_size, above_4g_mem_size, boot_device, hd);
 
     if (pci_enabled && usb_enabled) {
