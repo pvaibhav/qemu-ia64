@@ -40,6 +40,7 @@
 #include "ia64intrin.h"
 #include <unistd.h>
 #include "virtio-blk.h"
+#include "sysemu.h"
 
 #define FW_FILENAME "Flash.fd"
 
@@ -47,6 +48,10 @@
 #define ACPI_DATA_SIZE       0x10000
 
 #define MAX_IDE_BUS 2
+#define MAX_IDE_DEVS 2
+#if !defined(kvm_enabled)
+#define kvm_enabled(x) (0)
+#endif
 
 static ISADevice *rtc_state;
 static PCIDevice *i440fx_state;
@@ -364,15 +369,18 @@ static void audio_init (PCIBus *pci_bus, qemu_irq *pic)
 }
 #endif
 
-static void ia64_init_ne2k_isa(NICInfo *nd, qemu_irq *pic)
+#if 0
+static void pc_init_ne2k_isa(NICInfo *nd, qemu_irq *pic)
 {
     static int nb_ne2k = 0;
 
     if (nb_ne2k == NE2000_NB_MAX)
         return;
-    isa_ne2000_init(ne2000_io[nb_ne2k], (pic[ne2000_irq[nb_ne2k]])->n, nd);
+
+    isa_ne2000_init(ne2000_io[nb_ne2k], pic[ne2000_irq[nb_ne2k]], nd);
     nb_ne2k++;
 }
+#endif
 
 /* Itanium hardware initialisation */
 static void ipf_init1(ram_addr_t ram_size,
@@ -423,11 +431,14 @@ static void ipf_init1(ram_addr_t ram_size,
         }
         if (i != 0)
             env->hflags |= HF_HALTED_MASK;
-        register_savevm("cpu", i, 4, cpu_save, cpu_load, env);
-        qemu_register_reset(main_cpu_reset, 0, env);
+        /* pvaibhav: this is unimplemented right now. Need to convert to qdev.
+         * register_savevm("cpu", i, 4, cpu_save, cpu_load, env);
+         */
+        qemu_register_reset(main_cpu_reset, env);
     }
 
     /* allocate RAM */
+#if 0
     if (kvm_enabled()) {
         ram_addr = qemu_ram_alloc(0xa0000);
         cpu_register_physical_memory(0, 0xa0000, ram_addr);
@@ -440,13 +451,16 @@ static void ipf_init1(ram_addr_t ram_size,
         ram_addr = qemu_ram_alloc(ram_size - 0x100000);
         cpu_register_physical_memory(0x100000, ram_size - 0x100000, ram_addr);
     } else {
-        ram_addr = qemu_ram_alloc(ram_size);
+#endif
+        ram_addr = qemu_ram_alloc(0, "guest ram", ram_size);
         cpu_register_physical_memory(0, ram_size, ram_addr);
+#if 0
     }
+#endif
 
     /* above 4giga memory allocation */
     if (above_4g_mem_size > 0) {
-        ram_addr = qemu_ram_alloc(above_4g_mem_size);
+        ram_addr = qemu_ram_alloc(0, "guest ram above 4gb", above_4g_mem_size);
         cpu_register_physical_memory(0x100000000, above_4g_mem_size, ram_addr);
     }
 
@@ -459,7 +473,7 @@ static void ipf_init1(ram_addr_t ram_size,
         unsigned long type = READ_FROM_NVRAM;
         unsigned long i = 0;
         unsigned long fw_offset;
-        ram_addr_t fw_mem = qemu_ram_alloc(GFW_SIZE);
+        ram_addr_t fw_mem = qemu_ram_alloc(0, "firmware", GFW_SIZE);
 
         snprintf(buf, sizeof(buf), "%s/%s", bios_dir, FW_FILENAME);
         image = read_image(buf, &image_size );
@@ -493,8 +507,9 @@ static void ipf_init1(ram_addr_t ram_size,
 
     /*Register legacy io address space, size:64M*/
     ipf_legacy_io_base = 0xE0000000;
-    ipf_legacy_io_mem = cpu_register_io_memory(0, ipf_legacy_io_read,
-                                               ipf_legacy_io_write, NULL);
+    ipf_legacy_io_mem = cpu_register_io_memory(ipf_legacy_io_read,
+                                               ipf_legacy_io_write, NULL,
+                                               DEVICE_LITTLE_ENDIAN);
     cpu_register_physical_memory(ipf_legacy_io_base, 64*1024*1024,
                                  ipf_legacy_io_mem);
 
@@ -544,7 +559,7 @@ static void ipf_init1(ram_addr_t ram_size,
         NICInfo *nd = &nd_table[i];
 
         if (!pci_enabled || (nd->model && strcmp(nd->model, "ne2k_isa") == 0))
-            ia64_init_ne2k_isa(nd, i8259);
+            pc_init_ne2k_isa(nd /*, i8259*/);
         else
             pci_nic_init(nd, "e1000", NULL);
     }

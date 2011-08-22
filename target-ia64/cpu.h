@@ -63,6 +63,9 @@ typedef struct CPUIA64State {
     } cfm;
 
     uint64_t code_ends_at;
+    uint32_t hflags;
+#define CPU_PAL_HALT 1
+#define HF_HALTED_MASK       (1 << CPU_PAL_HALT)
     // TODO: cpuid, pmd, user mask and alat registers
 
     CPU_COMMON
